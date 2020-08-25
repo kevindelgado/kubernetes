@@ -43,7 +43,12 @@ import (
 	"k8s.io/utils/trace"
 )
 
-const defaultExpectedTypeName = "<unspecified>"
+const (
+	defaultBackoffCap       = time.Minute
+	defaultBackoffFactor    = 2.0
+	defaultPeriod           = time.Second
+	defaultExpectedTypeName = "<unspecified>"
+)
 
 // Reflector watches a specified resource and causes all changes to be reflected in the given store.
 type Reflector struct {
@@ -78,6 +83,10 @@ type Reflector struct {
 	// paginatedResult defines whether pagination should be forced for list calls.
 	// It is set based on the result of the initial list call.
 	paginatedResult bool
+	// connPeriod defines the starting point for how to long to wait between listerWatcher.Watch connection refused errors. It gets multiplied
+	connPeriod time.Duration
+	// connBackoffCap limits how long to backoff on listerWatcher.Watch connection refused errors.
+	connBackoffCap time.Duration
 	// lastSyncResourceVersion is the resource version token last
 	// observed when doing a sync with the underlying store
 	// it is thread safe, but not synchronized with the underlying store
@@ -160,9 +169,11 @@ func NewReflector(lw ListerWatcher, expectedType interface{}, store Store, resyn
 func NewNamedReflector(name string, lw ListerWatcher, expectedType interface{}, store Store, resyncPeriod time.Duration) *Reflector {
 	realClock := &clock.RealClock{}
 	r := &Reflector{
-		name:          name,
-		listerWatcher: lw,
-		store:         store,
+		name:           name,
+		listerWatcher:  lw,
+		store:          store,
+		connPeriod:     defaultPeriod,
+		connBackoffCap: defaultBackoffCap,
 		// We used to make the call every 1sec (1 QPS), the goal here is to achieve ~98% traffic reduction when
 		// API server is not healthy. With these parameters, backoff will stop at [30,60) sec interval which is
 		// 0.22 QPS. If we don't backoff for 2min, assume API server is healthy and we reset the backoff.
@@ -377,6 +388,7 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 		}
 	}()
 
+	connBackoff := r.connPeriod
 	for {
 		// give the stopCh a chance to stop the loop, even in case of continue statements further down on errors
 		select {
@@ -404,13 +416,23 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 			// If this is "connection refused" error, it means that most likely apiserver is not responsive.
 			// It doesn't make sense to re-list all objects because most likely we will be able to restart
 			// watch where we ended.
-			// If that's the case wait and resend watch request.
+
+			// If that's the case begin exponentially backing off and resend watch request.
+			// Once we have backed off for greater than the backoff cap we are unlikely to be able to restart
+			// and should return the error.
+
 			if utilnet.IsConnectionRefused(err) {
-				time.Sleep(time.Second)
+				if connBackoff > r.connBackoffCap {
+					return err
+				}
+				time.Sleep(connBackoff)
+				connBackoff *= time.Duration(defaultBackoffFactor)
 				continue
 			}
 			return err
 		}
+		// reset the connBackoff bacause connection to the apiserver was successful
+		connBackoff = r.connPeriod
 
 		if err := r.watchHandler(start, w, &resourceVersion, resyncerrc, stopCh); err != nil {
 			if err != errorStopRequested {

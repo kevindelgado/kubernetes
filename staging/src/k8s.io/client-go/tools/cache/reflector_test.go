@@ -22,15 +22,17 @@ import (
 	"math/rand"
 	"reflect"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/clock"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 )
@@ -355,6 +357,48 @@ func TestReflectorListAndWatchWithErrors(t *testing.T) {
 		}
 		r := NewReflector(lw, &v1.Pod{}, s, 0)
 		r.ListAndWatch(wait.NeverStop)
+	}
+}
+
+func TestReflectorListAndWatchConnRefused(t *testing.T) {
+	table := []struct {
+		connFails int
+		err       error
+	}{
+		{3, nil},
+		{5, syscall.ECONNREFUSED},
+	}
+	for _, test := range table {
+		stopCh := make(chan struct{})
+		connFails := test.connFails
+		lw := &testLW{
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				if connFails > 0 {
+					connFails--
+					return nil, syscall.ECONNREFUSED
+				}
+				close(stopCh)
+				return watch.NewFake(), nil
+			},
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return &v1.PodList{ListMeta: metav1.ListMeta{ResourceVersion: "1"}}, nil
+			},
+		}
+		// NOTE(kdelga): It it better to override the connPeriod here with a struct literal or change the interface of NewReflector?
+		r := &Reflector{
+			name:              "test-reflector",
+			listerWatcher:     lw,
+			store:             NewFIFO(MetaNamespaceKeyFunc),
+			connPeriod:        time.Millisecond,
+			connBackoffCap:    10 * time.Millisecond,
+			clock:             &clock.RealClock{},
+			watchErrorHandler: WatchErrorHandler(DefaultWatchErrorHandler),
+		}
+		err := r.ListAndWatch(stopCh)
+		if test.err != err {
+			t.Errorf("expected: %v, got: %v", test.err, err)
+
+		}
 	}
 }
 
