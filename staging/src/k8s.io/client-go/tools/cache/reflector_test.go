@@ -19,7 +19,6 @@ package cache
 import (
 	"errors"
 	"fmt"
-	"math"
 	"math/rand"
 	"reflect"
 	"strconv"
@@ -363,20 +362,32 @@ func TestReflectorListAndWatchWithErrors(t *testing.T) {
 
 func TestReflectorListAndWatchInitConnBackoff(t *testing.T) {
 	table := []struct {
-		numConnFails float64
+		numConnFails int
 	}{
-		{3.0},
-		{6.0},
+		{3},
+		{6},
 	}
 	for _, test := range table {
-		t.Run(fmt.Sprintf("%d connection failures takes at least %d ms", int(test.numConnFails), int(math.Pow(2, test.numConnFails))),
+		t.Run(fmt.Sprintf("%d connection failures takes at least %d ms", test.numConnFails, 1<<test.numConnFails),
 			func(t *testing.T) {
 				stopCh := make(chan struct{})
 				connFails := test.numConnFails
+				fakeClock := clock.NewFakeClock(time.Unix(0, 0))
+				bm := wait.NewExponentialBackoffManager(time.Millisecond, 50*time.Millisecond, 100*time.Millisecond, 2.0, 1.0, fakeClock)
 				lw := &testLW{
 					WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+						iter := test.numConnFails - connFails
+						fmt.Println("\nBegin iteration by setting it to", iter)
 						if connFails > 0 {
+							go func() {
+								s := fakeClock.Now()
+								time.Sleep(3 * time.Second)
+								step := 1 << (iter + 1)
+								fakeClock.Step(time.Duration(step) * time.Millisecond)
+								fmt.Printf("within a goro we grab the current time %v,\n\t sleep for 3s \n\t and step the clock %dms\n\n", s, step)
+							}()
 							connFails--
+							fmt.Printf("return conn refused because we have %d more to go\n\n", connFails)
 							return nil, syscall.ECONNREFUSED
 						}
 						close(stopCh)
@@ -390,21 +401,21 @@ func TestReflectorListAndWatchInitConnBackoff(t *testing.T) {
 					name:                   "test-reflector",
 					listerWatcher:          lw,
 					store:                  NewFIFO(MetaNamespaceKeyFunc),
-					initConnBackoffManager: wait.NewExponentialBackoffManager(time.Millisecond, 50*time.Millisecond, 100*time.Millisecond, 2.0, 1.0, &clock.RealClock{}),
-					clock:                  &clock.RealClock{},
+					initConnBackoffManager: bm,
+					clock:                  fakeClock,
 					watchErrorHandler:      WatchErrorHandler(DefaultWatchErrorHandler),
 				}
-				start := time.Now()
+				start := fakeClock.Now()
 				err := r.ListAndWatch(stopCh)
-				elapsed := time.Since(start)
+				elapsed := fakeClock.Since(start)
+				fmt.Println("elapsed", elapsed)
 				if err != nil {
 					t.Errorf("unexpected error %v", err)
 				}
-				expLowerBound := math.Pow(2, test.numConnFails)
+				expLowerBound := 1 << test.numConnFails
 				if elapsed < (time.Duration(expLowerBound) * time.Millisecond) {
 					t.Errorf("expected lower bound of ListAndWatch: %v, got %v", expLowerBound, elapsed)
 				}
-
 			})
 	}
 }

@@ -402,6 +402,7 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 
 		// start the clock before sending the request, since some proxies won't flush headers until after the first watch event is sent
 		start := r.clock.Now()
+		fmt.Println("We're about to call Watch with a start time of:", start)
 		w, err := r.listerWatcher.Watch(options)
 		if err != nil {
 			// If this is "connection refused" error, it means that most likely apiserver is not responsive.
@@ -409,7 +410,9 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 			// watch where we ended.
 			// If that's the case begin exponentially backing off and resend watch request.
 			if utilnet.IsConnectionRefused(err) {
+				fmt.Printf("watch returned a conn ref error as expected and the time since start is %v \n\t backing off until timer buzzes\n", r.clock.Since(start))
 				<-r.initConnBackoffManager.Backoff().C()
+				fmt.Printf("DING! time since start is %v\n\n", r.clock.Since(start))
 				continue
 			}
 			return err

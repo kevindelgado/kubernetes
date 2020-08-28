@@ -17,6 +17,7 @@ limitations under the License.
 package clock
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -147,6 +148,7 @@ func (f *FakeClock) After(d time.Duration) <-chan time.Time {
 
 // NewTimer is the Fake version of time.NewTimer(d).
 func (f *FakeClock) NewTimer(d time.Duration) Timer {
+	fmt.Printf("requesting a new timer for %v", d)
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	stopTime := f.time.Add(d)
@@ -159,6 +161,7 @@ func (f *FakeClock) NewTimer(d time.Duration) Timer {
 		},
 	}
 	f.waiters = append(f.waiters, timer.waiter)
+	fmt.Printf("waiters appended, stop time set to %v\n\n", stopTime)
 	return timer
 }
 
@@ -196,6 +199,7 @@ func (f *FakeClock) SetTime(t time.Time) {
 
 // Actually changes the time and checks any waiters. f must be write-locked.
 func (f *FakeClock) setTimeLocked(t time.Time) {
+	fmt.Printf("we are stepping the clock at time %v, \n\t requesting to set it to %v\n\t it has %d waiters\n\n", f.time, t, len(f.waiters))
 	f.time = t
 	newWaiters := make([]fakeClockWaiter, 0, len(f.waiters))
 	for i := range f.waiters {
@@ -354,12 +358,15 @@ func (f *fakeTimer) Reset(d time.Duration) bool {
 	defer f.fakeClock.lock.Unlock()
 	waiters := f.fakeClock.waiters
 	seekChan := f.waiter.destChan
+	fmt.Printf("Reseting to %v, we have %d waiters. Succesful?", d, len(waiters))
 	for i := range waiters {
 		if waiters[i].destChan == seekChan {
 			waiters[i].targetTime = f.fakeClock.time.Add(d)
+			fmt.Println("yes\n")
 			return true
 		}
 	}
+	fmt.Println("no\n")
 	return false
 }
 

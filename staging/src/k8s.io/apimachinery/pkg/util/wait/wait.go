@@ -19,6 +19,7 @@ package wait
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
@@ -338,10 +339,14 @@ func (b *exponentialBackoffManagerImpl) getNextBackoff() time.Duration {
 // Backoff implements BackoffManager.Backoff, it returns a timer so caller can block on the timer for exponential backoff.
 // The returned timer must be drained before calling Backoff() the second time
 func (b *exponentialBackoffManagerImpl) Backoff() clock.Timer {
+	next := b.getNextBackoff()
+	fmt.Printf("were in Backoff(),\n")
 	if b.backoffTimer == nil {
-		b.backoffTimer = b.clock.NewTimer(b.getNextBackoff())
+		fmt.Printf("timer is NIL creating new one for time: %v\n\n", next)
+		b.backoffTimer = b.clock.NewTimer(next)
 	} else {
-		b.backoffTimer.Reset(b.getNextBackoff())
+		ok := b.backoffTimer.Reset(next)
+		fmt.Printf("timer is NOT NIL trying new one for time: %v, successful? %t\n\n", next, ok)
 	}
 	return b.backoffTimer
 }
