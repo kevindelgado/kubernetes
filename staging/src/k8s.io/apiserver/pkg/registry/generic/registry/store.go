@@ -78,6 +78,8 @@ type GenericStore interface {
 // specific to the API.
 //
 // TODO: make the default exposed methods exactly match a generic RESTStorage
+
+// kdelga: and here's our impl of a rest Creater (actually it implements all the rest storage)
 type Store struct {
 	// NewFunc returns a new instance of the type this registry returns for a
 	// GET of a single object, e.g.:
@@ -336,6 +338,9 @@ func (e *Store) ListPredicate(ctx context.Context, p storage.SelectionPredicate,
 }
 
 // Create inserts a new item according to the unique key from the object.
+// kdelga: here is where it implements rest Creater
+// * before, create, after
+// * You just write the CreateStrategy
 func (e *Store) Create(ctx context.Context, obj runtime.Object, createValidation rest.ValidateObjectFunc, options *metav1.CreateOptions) (runtime.Object, error) {
 	if err := rest.BeforeCreate(e.CreateStrategy, ctx, obj); err != nil {
 		return nil, err

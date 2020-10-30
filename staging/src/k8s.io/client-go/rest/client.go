@@ -165,12 +165,13 @@ func readExpBackoffConfig() BackoffManager {
 //  Do()
 // if err != nil { ... }
 // list, ok := resp.(*api.PodList)
-//
+// kdelga: Verb which just begins building a request via NewRequest...
 func (c *RESTClient) Verb(verb string) *Request {
 	return NewRequest(c).Verb(verb)
 }
 
 // Post begins a POST request. Short for c.Verb("POST").
+// kdelga: post just short for Verb("POST")...
 func (c *RESTClient) Post() *Request {
 	return c.Verb("POST")
 }

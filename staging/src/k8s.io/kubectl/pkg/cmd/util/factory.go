@@ -37,6 +37,12 @@ import (
 // TODO: make the functions interfaces
 // TODO: pass the various interfaces on the factory directly into the command constructors (so the
 // commands are decoupled from the factory).
+// kdelga: This is the factory passed to the RunCreate()
+// * Replacible logic for kubectl (diff CLI like the os (openshift) cli use a different factory) gives you things such as
+// ** RESTClient for accessing k8s resources
+// ** a validation schema that can validate API objects serialized as byte
+// ** a kubeconfig loader so that we can see what namespace we want to create the object in by default
+// ** But Also, it can give you something called a Builder...
 type Factory interface {
 	genericclioptions.RESTClientGetter
 

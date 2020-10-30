@@ -147,6 +147,8 @@ func init() {
 // defaultKubernetesFeatureGates consists of all known Kubernetes-specific feature keys.
 // To add a new feature, define a key for it above and add it here. The features will be
 // available throughout Kubernetes binaries.
+
+// kdelga: this is where we feature gate (not sure if relevant)
 var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
 	StreamingProxyRedirects: {Default: true, PreRelease: featuregate.Deprecated},
 	ValidateProxyRedirects:  {Default: true, PreRelease: featuregate.Beta},

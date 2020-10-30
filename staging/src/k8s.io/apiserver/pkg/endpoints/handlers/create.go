@@ -44,6 +44,14 @@ import (
 	utiltrace "k8s.io/utils/trace"
 )
 
+// kdelga: Here is themoney! the create Handler
+// this is no longer setup, this is one runs when the request comes in!
+// talk about all the things it does here:
+// * version/format negotiation
+// * read body
+// * decode/convert
+// * auditing
+// * store object to db (in doing so it hits mutating admission (is this the webhook?))
 func createHandler(r rest.NamedCreater, scope *RequestScope, admit admission.Interface, includeName bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		// For performance tracking purposes.
@@ -196,6 +204,7 @@ func CreateNamedResource(r rest.NamedCreater, scope *RequestScope, admission adm
 }
 
 // CreateResource returns a function that will handle a resource creation.
+// kdelga: this is the handler setup by the installer it actually creates the resource in createHandler
 func CreateResource(r rest.Creater, scope *RequestScope, admission admission.Interface) http.HandlerFunc {
 	return createHandler(&namedCreaterAdapter{r}, scope, admission, false)
 }

@@ -313,6 +313,10 @@ func (s *GenericAPIServer) PrepareRun() preparedGenericAPIServer {
 
 // Run spawns the secure http server. It only returns if stopCh is closed
 // or the secure port cannot be listened on initially.
+
+// kdelga: Run just kicks off the NonBlockingRun unsuring it shuts down
+// with the proper delay
+// and blocks
 func (s preparedGenericAPIServer) Run(stopCh <-chan struct{}) error {
 	delayedStopCh := make(chan struct{})
 
@@ -357,6 +361,8 @@ func (s preparedGenericAPIServer) Run(stopCh <-chan struct{}) error {
 // NonBlockingRun spawns the secure http server. An error is
 // returned if the secure port cannot be listened on.
 // The returned channel is closed when the (asynchronous) termination is finished.
+
+// kdelga: the non-blocking run just calls scureservinginfo.Serve...
 func (s preparedGenericAPIServer) NonBlockingRun(stopCh <-chan struct{}) (<-chan struct{}, error) {
 	// Use an stop channel to allow graceful shutdown without dropping audit events
 	// after http server shutdown.

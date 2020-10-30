@@ -70,6 +70,7 @@ type REST struct {
 }
 
 // NewREST returns a RESTStorage object that will work against ReplicaSet.
+// kdelga: continues here with various different parts of the strategy.
 func NewREST(optsGetter generic.RESTOptionsGetter) (*REST, *StatusREST, error) {
 	store := &genericregistry.Store{
 		NewFunc:                  func() runtime.Object { return &apps.ReplicaSet{} },

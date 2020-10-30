@@ -519,6 +519,8 @@ type RESTStorageProvider interface {
 }
 
 // InstallAPIs will install the APIs for the restStorageProviders if they are enabled.
+// kdelga: and this is the glue that sets up all REST resources with their backing storage
+//
 func (m *Master) InstallAPIs(apiResourceConfigSource serverstorage.APIResourceConfigSource, restOptionsGetter generic.RESTOptionsGetter, restStorageProviders ...RESTStorageProvider) error {
 	apiGroupsInfo := []*genericapiserver.APIGroupInfo{}
 

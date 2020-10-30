@@ -179,6 +179,7 @@ type CollectionDeleter interface {
 }
 
 // Creater is an object that can create an instance of a RESTful object.
+// kdlega: This is the interface used to create objects in storage
 type Creater interface {
 	// New returns an empty object that can be used with Create after request data has been put into it.
 	// This object must be a pointer type for use with Codec.DecodeInto([]byte, runtime.Object)
@@ -189,6 +190,7 @@ type Creater interface {
 }
 
 // NamedCreater is an object that can create an instance of a RESTful object using a name parameter.
+// kdlega: This is the interface used to create objects in storage
 type NamedCreater interface {
 	// New returns an empty object that can be used with Create after request data has been put into it.
 	// This object must be a pointer type for use with Codec.DecodeInto([]byte, runtime.Object)

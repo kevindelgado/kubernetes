@@ -115,6 +115,8 @@ type Request struct {
 }
 
 // NewRequest creates a new request helper object for accessing runtime.Objects on a server.
+// kdelga: NewRequest just helps you create the request/path you need to make a request to the api server
+// It has all these helpers that let you build the request (show screenshot on a bunch of them but focus on Body())...
 func NewRequest(c *RESTClient) *Request {
 	var backoff BackoffManager
 	if c.createBackoffMgr != nil {
@@ -422,6 +424,10 @@ func (r *Request) MaxRetries(maxRetries int) *Request {
 // If obj is a runtime.Object, marshal it correctly, and set Content-Type header.
 // If obj is a runtime.Object and nil, do nothing.
 // Otherwise, set an error.
+// kdelga: In our example, we use Body to take in a kubernetes runtime.Object (the rs)
+// (which is our representation of k8s api objects)
+// and it gets encoded into the body of an http request.
+// but more generally it can take in a bunch of types (string, byte array, io.Reader interface, etc)
 func (r *Request) Body(obj interface{}) *Request {
 	if r.err != nil {
 		return r
@@ -450,6 +456,10 @@ func (r *Request) Body(obj interface{}) *Request {
 			r.err = err
 			return r
 		}
+		// kdelga: And this runtime.Encode is what calls into the serialization machinery
+		// this turns the k8s object in memory into the bytes that you send over the wire.
+		// And as you'll see in a second, on the other side of the wire, the apiserver uses this
+		// make sense of the bytes we've sent to it and reconstruct it back into a k8s object...
 		data, err := runtime.Encode(encoder, t)
 		if err != nil {
 			r.err = err
@@ -949,6 +959,9 @@ func (r *Request) request(ctx context.Context, fn func(*http.Request, *http.Resp
 // Error type:
 //  * If the server responds with a status: *errors.StatusError or *errors.UnexpectedObjectError
 //  * http.Client.Do errors are returned directly.
+
+// kdelga: And finally, we call Do which executes the http request
+// calling this request helper function that makes the HTTP client,
 func (r *Request) Do(ctx context.Context) Result {
 	var result Result
 	err := r.request(ctx, func(req *http.Request, resp *http.Response) {

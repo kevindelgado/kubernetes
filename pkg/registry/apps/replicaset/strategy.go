@@ -45,6 +45,7 @@ import (
 )
 
 // rsStrategy implements verification logic for ReplicaSets.
+// kdelga: and here is the actual rsStrategy
 type rsStrategy struct {
 	runtime.ObjectTyper
 	names.NameGenerator

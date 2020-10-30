@@ -668,6 +668,9 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
 	return s, nil
 }
 
+// kdelga: and here is the default handler chain gets set up
+// run through all these, and what they mean, quickly, discuss some extras too.
+// point out the new stuff (priority and fairness)
 func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
 	handler := genericapifilters.WithAuthorization(apiHandler, c.Authorization.Authorizer, c.Serializer)
 	if c.FlowControl != nil {
@@ -694,6 +697,8 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
 	return handler
 }
 
+// kdelga: this is the equivalent of the old init()
+// it enables Prfiling, metrics discovery, feature gates
 func installAPI(s *GenericAPIServer, c *Config) {
 	if c.EnableIndex {
 		routes.Index{}.Install(s.listedPathProvider, s.Handler.NonGoRestfulMux)

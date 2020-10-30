@@ -36,6 +36,7 @@ import (
 // RESTCreateStrategy defines the minimum validation, accepted input, and
 // name generation behavior to create an object that follows Kubernetes
 // API conventions.
+// kdelga: create strategy interface
 type RESTCreateStrategy interface {
 	runtime.ObjectTyper
 	// The name generator is used when the standard GenerateName field is set.

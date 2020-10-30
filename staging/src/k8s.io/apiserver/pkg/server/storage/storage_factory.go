@@ -62,6 +62,7 @@ type StorageFactory interface {
 // 1. Merged etcd config, including: auth, server locations, prefixes
 // 2. Resource encodings for storage: group,version,kind to store as
 // 3. Cohabitating default: some resources like hpa are exposed through multiple APIs.  They must agree on 1 and 2
+// kdelga: this is the factory that gives us the storage interface
 type DefaultStorageFactory struct {
 	// StorageConfig describes how to create a storage backend in general.
 	// Its authentication information will be used for every storage.Interface returned.

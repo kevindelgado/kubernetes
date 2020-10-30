@@ -97,6 +97,7 @@ func NewCreateOptions(ioStreams genericclioptions.IOStreams) *CreateOptions {
 }
 
 // NewCmdCreate returns new initialized instance of create sub command
+// kdelga: This is the entrypoint to our command, you see that we create a cobra command and tell that command how to behave when Run is called on it
 func NewCmdCreate(f cmdutil.Factory, ioStreams genericclioptions.IOStreams) *cobra.Command {
 	o := NewCreateOptions(ioStreams)
 
@@ -223,7 +224,13 @@ func (o *CreateOptions) Complete(f cmdutil.Factory, cmd *cobra.Command) error {
 	return nil
 }
 
-// RunCreate performs the creation
+// RunCreate performs the creation (as dbsmith says: "does all the work")
+// kdelga: This is what actually does the work, it:
+// 1. gets passed a factory
+// 2. Uses the factory to create a builder
+// //3. Builder creates a resource
+// 3. Builder uses a helper to invoke the helper's Create on our object.
+// These are the 3 (minus Resource) components of kubectl
 func (o *CreateOptions) RunCreate(f cmdutil.Factory, cmd *cobra.Command) error {
 	// raw only makes sense for a single file resource multiple objects aren't likely to do what you want.
 	// the validator enforces this, so
@@ -263,6 +270,9 @@ func (o *CreateOptions) RunCreate(f cmdutil.Factory, cmd *cobra.Command) error {
 	}
 
 	count := 0
+	// kdelga: so for each resource that the builder gives us, we visit it,
+	// do some optional logic with annotations, recording, dry runs,etc
+	// but most importantly...
 	err = r.Visit(func(info *resource.Info, err error) error {
 		if err != nil {
 			return err
@@ -281,6 +291,8 @@ func (o *CreateOptions) RunCreate(f cmdutil.Factory, cmd *cobra.Command) error {
 					return cmdutil.AddSourceToErr("creating", info.Source, err)
 				}
 			}
+			// ...we create helper from the resource and call create on it
+			// a helper is...
 			obj, err := resource.
 				NewHelper(info.Client, info.Mapping).
 				DryRun(o.DryRunStrategy == cmdutil.DryRunServer).

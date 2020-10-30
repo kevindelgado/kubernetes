@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,6 +34,7 @@ import (
 type ErrMatchFunc func(error) bool
 
 // Result contains helper methods for dealing with the outcome of a Builder.
+// kdelga: RunCreate calls Visit on the results visitor.
 type Result struct {
 	err     error
 	visitor Visitor

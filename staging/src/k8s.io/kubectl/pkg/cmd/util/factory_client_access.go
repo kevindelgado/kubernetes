@@ -35,6 +35,7 @@ import (
 	"k8s.io/kubectl/pkg/validation"
 )
 
+// kdelga: implementation of factory
 type factoryImpl struct {
 	clientGetter genericclioptions.RESTClientGetter
 
@@ -47,6 +48,7 @@ type openAPIGetter struct {
 	getter openapi.Getter
 }
 
+// kdelga: Factory used by cmd.go for create command
 func NewFactory(clientGetter genericclioptions.RESTClientGetter) Factory {
 	if clientGetter == nil {
 		panic("attempt to instantiate client_access_factory with nil clientGetter")

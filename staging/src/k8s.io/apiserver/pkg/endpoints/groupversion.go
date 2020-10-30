@@ -39,7 +39,10 @@ import (
 // /${storage_key}[/${object_name}]
 // Where 'storage_key' points to a rest.Storage object stored in storage.
 // This object should contain all parameterization necessary for running a particular API version
+
+// kdelga: this is the APIGroupVersion that go-restful muxer
 type APIGroupVersion struct {
+	//kdelga: handles business logic of rest request (wraps a thing that represents the storage)
 	Storage map[string]rest.Storage
 
 	Root string

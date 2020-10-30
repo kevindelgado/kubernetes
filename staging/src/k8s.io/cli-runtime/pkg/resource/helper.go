@@ -29,8 +29,11 @@ import (
 
 var metadataAccessor = meta.NewAccessor()
 
+// kdelga: A helper:
 // Helper provides methods for retrieving or mutating a RESTful
 // resource.
+// kdelga: So in our case we use this helper to call Create on the object retrieved from disk by the builder and serialized into a kubernetes object...
+// kdelga: (Show screenshot of other REST functions in addition to Create)
 type Helper struct {
 	// The name of this resource as the server would recognize it
 	Resource string
@@ -132,6 +135,7 @@ func (m *Helper) DeleteWithOptions(namespace, name string, options *metav1.Delet
 		Get()
 }
 
+// kdelga: when the helper's Create method is called, the helper uses it's REST client...
 func (m *Helper) Create(namespace string, modify bool, obj runtime.Object) (runtime.Object, error) {
 	return m.CreateWithOptions(namespace, modify, obj, nil)
 }
@@ -163,6 +167,7 @@ func (m *Helper) CreateWithOptions(namespace string, modify bool, obj runtime.Ob
 	return m.createResource(m.RESTClient, m.Resource, namespace, obj, options)
 }
 
+// kdelga: To make a Post Request using the RESTClient, which is the next layer down in client-go...
 func (m *Helper) createResource(c RESTClient, resource, namespace string, obj runtime.Object, options *metav1.CreateOptions) (runtime.Object, error) {
 	return c.Post().
 		NamespaceIfScoped(namespace, m.NamespaceScoped).

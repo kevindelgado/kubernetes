@@ -140,6 +140,7 @@ func (s *store) Get(ctx context.Context, key string, opts storage.GetOptions, ou
 }
 
 // Create implements storage.Interface.Create.
+// kdelga: here's etcd3 implementation of Create
 func (s *store) Create(ctx context.Context, key string, obj, out runtime.Object, ttl uint64) error {
 	if version, err := s.versioner.ObjectResourceVersion(obj); err == nil && version != 0 {
 		return errors.New("resourceVersion should not be set on objects to be created")
@@ -147,6 +148,8 @@ func (s *store) Create(ctx context.Context, key string, obj, out runtime.Object,
 	if err := s.versioner.PrepareObjectForStorage(obj); err != nil {
 		return fmt.Errorf("PrepareObjectForStorage failed: %v", err)
 	}
+	// kdelga: by using the embedded codec, we have a canonical storage verison that all versions
+	// can be converted to/from and enables rollback and rollforward.
 	data, err := runtime.Encode(s.codec, obj)
 	if err != nil {
 		return err
