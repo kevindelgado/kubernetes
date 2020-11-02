@@ -33,12 +33,19 @@ import (
 
 // NewSharedInformerFactory constructs a new instance of metadataSharedInformerFactory for all namespaces.
 func NewSharedInformerFactory(client metadata.Interface, defaultResync time.Duration) SharedInformerFactory {
-	return NewFilteredSharedInformerFactory(client, defaultResync, metav1.NamespaceAll, nil)
+	return NewStoppableSharedInformerFactory(client, defaultResync, metav1.NamespaceAll, nil, nil)
 }
 
 // NewFilteredSharedInformerFactory constructs a new instance of metadataSharedInformerFactory.
 // Listers obtained via this factory will be subject to the same filters as specified here.
 func NewFilteredSharedInformerFactory(client metadata.Interface, defaultResync time.Duration, namespace string, tweakListOptions TweakListOptionsFunc) SharedInformerFactory {
+	return NewStoppableSharedInformerFactory(client, defaultResync, namespace, tweakListOptions, nil)
+}
+
+// NewStoppableSharedInformer constructs a new instance of metadataSahredInformerFactory
+// that is ran with customizable stop options.
+// TODO: Consider using a factory instead of ballooning constructors.
+func NewStoppableSharedInformerFactory(client metadata.Interface, defaultResync time.Duration, namespace string, tweakListOptions TweakListOptionsFunc, onListError cache.OnListErrorFunc) SharedInformerFactory {
 	return &metadataSharedInformerFactory{
 		client:           client,
 		defaultResync:    defaultResync,
@@ -46,6 +53,7 @@ func NewFilteredSharedInformerFactory(client metadata.Interface, defaultResync t
 		informers:        map[schema.GroupVersionResource]informers.GenericInformer{},
 		startedInformers: make(map[schema.GroupVersionResource]bool),
 		tweakListOptions: tweakListOptions,
+		onListError:      onListError,
 	}
 }
 
@@ -60,6 +68,7 @@ type metadataSharedInformerFactory struct {
 	// This allows Start() to be called multiple times safely.
 	startedInformers map[schema.GroupVersionResource]bool
 	tweakListOptions TweakListOptionsFunc
+	onListError      cache.OnListErrorFunc
 }
 
 var _ SharedInformerFactory = &metadataSharedInformerFactory{}
@@ -91,6 +100,40 @@ func (f *metadataSharedInformerFactory) Start(stopCh <-chan struct{}) {
 			f.startedInformers[informerType] = true
 		}
 	}
+}
+
+func (f *metadataSharedInformerFactory) informerStopped(informerType schema.GroupVersionResource) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	delete(f.startedInformers, informerType)
+	delete(f.informers, informerType)
+}
+
+// StartWithStopOptions initializes all requested informers with their stop options.
+func (f *metadataSharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	onListError := func(error) bool {
+		return false
+	}
+	if f.onListError != nil {
+		onListError = f.onListError
+	}
+	stopOptions := cache.StopOptions{
+		ExternalStop: stopCh,
+		OnListError:  onListError,
+	}
+	for informerType, informer := range f.informers {
+		if !f.startedInformers[informerType] {
+			go func() {
+				defer f.informerStopped(informerType)
+				informer.Informer().RunWithStopOptions(stopOptions)
+				<-informer.Informer().Done().Done()
+			}()
+		}
+	}
+
 }
 
 // WaitForCacheSync waits for all started informers' cache were synced.
