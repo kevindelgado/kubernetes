@@ -253,6 +253,70 @@ func TestResyncCheckPeriod(t *testing.T) {
 	}
 }
 
+func TestSharedInformerRemoveEventHandler(t *testing.T) {
+	// source simulates an apiserver object endpoint.
+	source := fcache.NewFakeControllerSource()
+	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
+	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod2"}})
+
+	// create the shared informer and resync every 1s
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+
+	clock := clock.NewFakeClock(time.Now())
+	informer.clock = clock
+	informer.processor.clock = clock
+
+	// listener 1, never resync
+	listener1 := newTestListener("listener1", 0, "pod1", "pod2")
+	informer.AddEventHandlerWithResyncPeriod(listener1, listener1.resyncPeriod)
+
+	// listener 2, resync every 2s
+	listener2 := newTestListener("listener2", 2*time.Second, "pod1", "pod2")
+	informer.AddEventHandlerWithResyncPeriod(listener2, listener2.resyncPeriod)
+
+	// listener 3, resync every 3s
+	listener3 := newTestListener("listener3", 3*time.Second, "pod1", "pod2")
+	informer.AddEventHandlerWithResyncPeriod(listener3, listener3.resyncPeriod)
+
+	// listener 4, delete from the beginning
+	listener4 := newTestListener("listener4", 0, "pod1", "pod2")
+	informer.AddEventHandlerWithResyncPeriod(listener4, listener4.resyncPeriod)
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	go informer.Run(stop)
+	count := 4
+
+	informer.RemoveEventHandler(listener4)
+	if informer.EventHandlerCount() != count-1 {
+		t.Errorf("handler count, expected %d, got %d", count-1, informer.EventHandlerCount())
+	}
+	count--
+
+	clock.Step(2 * time.Second)
+	// make sure listener2 got the resync
+	if !listener2.ok() {
+		t.Errorf("%s: expected %v, got %v", listener2.name, listener2.expectedItemNames, listener2.receivedItemNames)
+	}
+
+	// wait a bit to give errant items a chance to go to 1 and 3
+	time.Sleep(1 * time.Second)
+
+	// ensure removal works when the listener and syncingListener lists are different
+	informer.RemoveEventHandler(listener1)
+	if informer.EventHandlerCount() != count-1 {
+		t.Errorf("handler count, expected %d, got %d", count-1, informer.EventHandlerCount())
+	}
+	count--
+
+	// ensure removal works when the listner is not in the syncing listener list
+	informer.RemoveEventHandler(listener2)
+	if informer.EventHandlerCount() != count-1 {
+		t.Errorf("handler count, expected %d, got %d", count-1, informer.EventHandlerCount())
+	}
+}
+
 // verify that https://github.com/kubernetes/kubernetes/issues/59822 is fixed
 func TestSharedInformerInitializationRace(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
