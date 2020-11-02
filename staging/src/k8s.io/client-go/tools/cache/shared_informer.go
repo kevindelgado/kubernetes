@@ -151,6 +151,12 @@ type SharedInformer interface {
 	// because the implementation takes time to do work and there may
 	// be competing load and scheduling noise.
 	AddEventHandlerWithResyncPeriod(handler ResourceEventHandler, resyncPeriod time.Duration)
+	// RemoveEventHandler removes an event handler from the shared informer.
+	// It returns true if the removal is successful
+	RemoveEventHandler(handler ResourceEventHandler) bool
+	// EventHandlerCount returns the number of event handlers
+	// currently registered with the shared informer.
+	EventHandlerCount() int
 	// GetStore returns the informer's local cache as a Store.
 	GetStore() Store
 	// GetController is deprecated, it does nothing useful
@@ -684,6 +690,14 @@ func (s *sharedIndexInformer) AddEventHandlerWithResyncPeriod(handler ResourceEv
 	}
 }
 
+func (s *sharedIndexInformer) RemoveEventHandler(handler ResourceEventHandler) bool {
+	return s.processor.removeEventHandler(handler)
+}
+
+func (s *sharedIndexInformer) EventHandlerCount() int {
+	return s.processor.eventHandlerCount()
+}
+
 func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 	s.blockDeltas.Lock()
 	defer s.blockDeltas.Unlock()
@@ -758,6 +772,39 @@ func (p *sharedProcessor) addListener(listener *processorListener) {
 func (p *sharedProcessor) addListenerLocked(listener *processorListener) {
 	p.listeners = append(p.listeners, listener)
 	p.syncingListeners = append(p.syncingListeners, listener)
+}
+
+func (p *sharedProcessor) removeListener(index int) {
+	handler := p.listeners[index].handler
+	p.listeners = append(p.listeners[:index], p.listeners[index+1:]...)
+	for i := len(p.syncingListeners) - 1; i >= 0; i-- {
+		if p.syncingListeners[i].handler == handler {
+			p.syncingListeners = append(p.syncingListeners[:i], p.syncingListeners[i+1:]...)
+		}
+	}
+}
+
+func (p *sharedProcessor) removeEventHandler(handler ResourceEventHandler) bool {
+	p.listenersLock.Lock()
+	defer p.listenersLock.Unlock()
+
+	for i, listener := range p.listeners {
+		// This will panic if the handler is not comparable
+		// i.e. it's assumed you have a direct handle to the handler
+		// that was passed in initially when it was added.
+		if listener.handler == handler {
+			p.removeListener(i)
+			return true
+		}
+	}
+	return false
+}
+
+func (p *sharedProcessor) eventHandlerCount() int {
+	p.listenersLock.Lock()
+	defer p.listenersLock.Unlock()
+
+	return len(p.listeners)
 }
 
 func (p *sharedProcessor) distribute(obj interface{}, sync bool) {
