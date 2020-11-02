@@ -151,6 +151,12 @@ type SharedInformer interface {
 	// because the implementation takes time to do work and there may
 	// be competing load and scheduling noise.
 	AddEventHandlerWithResyncPeriod(handler ResourceEventHandler, resyncPeriod time.Duration)
+	// RemoveEventHandler removes an event handler from the shared informer.
+	// It returns true if the removal is successful
+	RemoveEventHandler(handler ResourceEventHandler) bool
+	// EventHandlerCount returns the number of event handlers
+	// currently registered with the shared informer.
+	EventHandlerCount() int
 	// GetStore returns the informer's local cache as a Store.
 	GetStore() Store
 	// GetController is deprecated, it does nothing useful
@@ -650,6 +656,21 @@ func (s *sharedIndexInformer) AddEventHandlerWithResyncPeriod(handler ResourceEv
 	}
 }
 
+func (s *sharedIndexInformer) RemoveEventHandler(handler ResourceEventHandler) bool {
+	for i, listener := range s.processor.listeners {
+		// TODO: check if handlers can be compared, error out if not, document it.
+		if listener.handler == handler {
+			s.processor.removeListener(i)
+			return true
+		}
+	}
+	return false
+}
+
+func (s *sharedIndexInformer) EventHandlerCount() int {
+	return len(s.processor.listeners)
+}
+
 func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 	s.blockDeltas.Lock()
 	defer s.blockDeltas.Unlock()
@@ -724,6 +745,14 @@ func (p *sharedProcessor) addListener(listener *processorListener) {
 func (p *sharedProcessor) addListenerLocked(listener *processorListener) {
 	p.listeners = append(p.listeners, listener)
 	p.syncingListeners = append(p.syncingListeners, listener)
+}
+
+func (p *sharedProcessor) removeListener(index int) {
+	p.listenersLock.Lock()
+	defer p.listenersLock.Unlock()
+
+	p.listeners = append(p.listeners[:index], p.listeners[index+1:]...)
+	p.syncingListeners = append(p.syncingListeners[:index], p.syncingListeners[index+1:]...)
 }
 
 func (p *sharedProcessor) distribute(obj interface{}, sync bool) {
