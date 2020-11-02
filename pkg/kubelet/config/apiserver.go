@@ -17,7 +17,7 @@ limitations under the License.
 package config
 
 import (
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
@@ -43,6 +43,10 @@ func newSourceApiserverFromLW(lw cache.ListerWatcher, updates chan<- interface{}
 		}
 		updates <- kubetypes.PodUpdate{Pods: pods, Op: kubetypes.SET, Source: kubetypes.ApiserverSource}
 	}
-	r := cache.NewReflector(lw, &v1.Pod{}, cache.NewUndeltaStore(send, cache.MetaNamespaceKeyFunc), 0)
+	// TODO: It looks like cache.NewReflector is only used directly here and in the cacher
+	// In that case it might be fine to modify the signature as done here.
+	// If it's used elsewhere maybe it would be better to leave NewReflector as is
+	// and create a NewReflectorWithStopHandle() or something.
+	r := cache.NewReflector(lw, &v1.Pod{}, cache.NewUndeltaStore(send, cache.MetaNamespaceKeyFunc), 0, nil)
 	go r.Run(wait.NeverStop)
 }

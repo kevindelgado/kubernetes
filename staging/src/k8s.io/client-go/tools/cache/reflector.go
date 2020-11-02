@@ -99,6 +99,10 @@ type Reflector struct {
 	WatchListPageSize int64
 	// Called whenever the ListAndWatch drops the connection with an error.
 	watchErrorHandler WatchErrorHandler
+
+	// stopHandle contains channels for stopping and observing the stoppage of the reflector
+	// as well as err indicating why the reflector was stopped.
+	stopHandle *StopHandle
 }
 
 // ResourceVersionUpdater is an interface that allows store implementation to
@@ -147,9 +151,9 @@ var (
 
 // NewNamespaceKeyedIndexerAndReflector creates an Indexer and a Reflector
 // The indexer is configured to key on namespace
-func NewNamespaceKeyedIndexerAndReflector(lw ListerWatcher, expectedType interface{}, resyncPeriod time.Duration) (indexer Indexer, reflector *Reflector) {
+func NewNamespaceKeyedIndexerAndReflector(lw ListerWatcher, expectedType interface{}, resyncPeriod time.Duration, stopHandle *StopHandle) (indexer Indexer, reflector *Reflector) {
 	indexer = NewIndexer(MetaNamespaceKeyFunc, Indexers{NamespaceIndex: MetaNamespaceIndexFunc})
-	reflector = NewReflector(lw, expectedType, indexer, resyncPeriod)
+	reflector = NewReflector(lw, expectedType, indexer, resyncPeriod, stopHandle)
 	return indexer, reflector
 }
 
@@ -163,12 +167,12 @@ func NewNamespaceKeyedIndexerAndReflector(lw ListerWatcher, expectedType interfa
 // "yes".  This enables you to use reflectors to periodically process
 // everything as well as incrementally processing the things that
 // change.
-func NewReflector(lw ListerWatcher, expectedType interface{}, store Store, resyncPeriod time.Duration) *Reflector {
-	return NewNamedReflector(naming.GetNameFromCallsite(internalPackages...), lw, expectedType, store, resyncPeriod)
+func NewReflector(lw ListerWatcher, expectedType interface{}, store Store, resyncPeriod time.Duration, stopHandle *StopHandle) *Reflector {
+	return NewNamedReflector(naming.GetNameFromCallsite(internalPackages...), lw, expectedType, store, resyncPeriod, stopHandle)
 }
 
 // NewNamedReflector same as NewReflector, but with a specified name for logging
-func NewNamedReflector(name string, lw ListerWatcher, expectedType interface{}, store Store, resyncPeriod time.Duration) *Reflector {
+func NewNamedReflector(name string, lw ListerWatcher, expectedType interface{}, store Store, resyncPeriod time.Duration, stopHandle *StopHandle) *Reflector {
 	realClock := &clock.RealClock{}
 	r := &Reflector{
 		name:          name,
@@ -182,6 +186,7 @@ func NewNamedReflector(name string, lw ListerWatcher, expectedType interface{}, 
 		resyncPeriod:           resyncPeriod,
 		clock:                  realClock,
 		watchErrorHandler:      WatchErrorHandler(DefaultWatchErrorHandler),
+		stopHandle:             stopHandle,
 	}
 	r.setExpectedType(expectedType)
 	return r
@@ -212,17 +217,41 @@ func (r *Reflector) setExpectedType(expectedType interface{}) {
 // call chains to NewReflector, so they'd be low entropy names for reflectors
 var internalPackages = []string{"client-go/tools/cache/"}
 
-// Run repeatedly uses the reflector's ListAndWatch to fetch all the
+// RunWithStopOptions repeatedly uses the reflector's ListAndWatch to fetch all the
 // objects and subsequent deltas.
-// Run will exit when stopCh is closed.
-func (r *Reflector) Run(stopCh <-chan struct{}) {
+// RunWithStopOptions will exit when one of the stopOptions conditions is met.
+func (r *Reflector) RunWithStopOptions(stopOptions StopOptions) {
 	klog.V(2).Infof("Starting reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
 	wait.BackoffUntil(func() {
-		if err := r.ListAndWatch(stopCh); err != nil {
+		if err := r.ListAndWatch(r.stopHandle.stopRead); err != nil {
 			r.watchErrorHandler(r, err)
+			onListErr := stopOptions.OnListError
+			// default to never stopping (same as previous behavior that only had stop channel)
+			// TODO: maybe we should err if onListErr is nil though?
+			if onListErr != nil {
+				if stopOptions.OnListError(err) {
+					// TODO: is it ok to just directly write the err field on stopHandle?
+					r.stopHandle.err = err
+					klog.V(2).Infof("Closing with list error %v", r.stopHandle.err)
+					close(r.stopHandle.stopWrite)
+				}
+			}
 		}
-	}, r.backoffManager, true, stopCh)
+	}, r.backoffManager, true, r.stopHandle.stopRead)
 	klog.V(2).Infof("Stopping reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
+}
+
+// Run calls RunWithStopOptions and only exits when stopCh is closed
+func (r *Reflector) Run(stopCh <-chan struct{}) {
+	// TODO: see concerns in shared_informer about this pattern.
+	read, cancel := mergeChan(stopCh, r.stopHandle.stopRead)
+	defer cancel()
+	r.stopHandle.stopRead = read
+	r.RunWithStopOptions(StopOptions{
+		OnListError: func(err error) bool {
+			return false
+		},
+	})
 }
 
 var (

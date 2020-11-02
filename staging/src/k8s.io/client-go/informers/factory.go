@@ -59,11 +59,22 @@ type sharedInformerFactory struct {
 	lock             sync.Mutex
 	defaultResync    time.Duration
 	customResync     map[reflect.Type]time.Duration
+	onListError      cache.OnListErrorFunc
 
 	informers map[reflect.Type]cache.SharedIndexInformer
 	// startedInformers is used for tracking which informers have been started.
 	// This allows Start() to be called multiple times safely.
 	startedInformers map[reflect.Type]bool
+}
+
+// WithOnListErr sets the onListErrFunc that is added to the stop options
+// when calling StartWithStopOptions.
+// This method results in every informer in this factory getting the same stop options.
+func WithOnListError(onListError cache.OnListErrorFunc) SharedInformerOption {
+	return func(factory *sharedInformerFactory) *sharedInformerFactory {
+		factory.onListError = onListError
+		return factory
+	}
 }
 
 // WithCustomResyncConfig sets a custom resync period for the specified informer types.
@@ -133,6 +144,47 @@ func (f *sharedInformerFactory) Start(stopCh <-chan struct{}) {
 		if !f.startedInformers[informerType] {
 			go informer.Run(stopCh)
 			f.startedInformers[informerType] = true
+		}
+	}
+}
+
+// informerStopped removes a stopped informer from the factory's list
+// of informers and started informers.
+func (f *sharedInformerFactory) informerStopped(informerType reflect.Type) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	delete(f.startedInformers, informerType)
+	delete(f.informers, informerType)
+}
+
+// StartWithStopOptions initializes all requested informers with the stop options provided, defaulting to
+// the old stop options (only stopping via closure of stopCh).
+// It makes sure remove an informer from the list of informers and started informers when the informer is stopped
+// to prevent a race where InformerFor gives the user back a stopped informer that will never be started again.
+func (f *sharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	// default to old behavior of never stopping
+	onListError := func(error) bool {
+		return false
+	}
+	if f.onListError != nil {
+		onListError = f.onListError
+	}
+	stopOptions := cache.StopOptions{
+		ExternalStop: stopCh,
+		OnListError:  onListError,
+	}
+	for informerType, informer := range f.informers {
+		if !f.startedInformers[informerType] {
+			go func() {
+				defer f.informerStopped(informerType)
+				informer.RunWithStopOptions(stopOptions)
+				// TODO: is this done block necessary or does the above RWSO()
+				// block on its own?
+				<-informer.Done().Done()
+			}()
 		}
 	}
 }

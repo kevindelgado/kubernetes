@@ -26,6 +26,7 @@ import (
 type InformerFactory interface {
 	ForResource(resource schema.GroupVersionResource) (informers.GenericInformer, error)
 	Start(stopCh <-chan struct{})
+	StartWithStopOptions(stopCh <-chan struct{})
 }
 
 type informerFactory struct {
@@ -44,6 +45,11 @@ func (i *informerFactory) ForResource(resource schema.GroupVersionResource) (inf
 func (i *informerFactory) Start(stopCh <-chan struct{}) {
 	i.typedInformerFactory.Start(stopCh)
 	i.metadataInformerFactory.Start(stopCh)
+}
+
+func (i *informerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
+	i.typedInformerFactory.StartWithStopOptions(stopCh)
+	i.metadataInformerFactory.StartWithStopOptions(stopCh)
 }
 
 // NewInformerFactory creates a new InformerFactory which works with both typed
