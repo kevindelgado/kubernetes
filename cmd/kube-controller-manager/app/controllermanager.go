@@ -31,6 +31,7 @@ import (
 
 	"github.com/spf13/cobra"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -462,10 +463,15 @@ func GetAvailableResources(clientBuilder clientbuilder.ControllerClientBuilder) 
 // the shared-informers client and token controller.
 func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clientBuilder clientbuilder.ControllerClientBuilder, stop <-chan struct{}) (ControllerContext, error) {
 	versionedClient := rootClientBuilder.ClientOrDie("shared-informers")
-	sharedInformers := informers.NewSharedInformerFactory(versionedClient, ResyncPeriod(s)())
+	// TODO: modified to test new informer interface
+	// sharedInformers := informers.NewSharedInformerFactory(versionedClient, ResyncPeriod(s)())
+	onListErr := func(error) bool { return true }
+	sharedInformers := informers.NewSharedInformerFactoryWithOptions(versionedClient, ResyncPeriod(s)(), informers.WithOnListError(onListErr))
 
 	metadataClient := metadata.NewForConfigOrDie(rootClientBuilder.ConfigOrDie("metadata-informers"))
-	metadataInformers := metadatainformer.NewSharedInformerFactory(metadataClient, ResyncPeriod(s)())
+	// metadataInformers := metadatainformer.NewSharedInformerFactory(metadataClient, ResyncPeriod(s)())
+	// TODO: modified to test new informer interface
+	metadataInformers := metadatainformer.NewStoppableSharedInformerFactory(metadataClient, ResyncPeriod(s)(), metav1.NamespaceAll, nil, onListErr)
 
 	// If apiserver is not running we should wait for some time and fail only then. This is particularly
 	// important when we start apiserver and controller manager at the same time.
