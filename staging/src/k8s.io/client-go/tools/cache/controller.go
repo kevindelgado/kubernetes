@@ -78,7 +78,7 @@ type Config struct {
 
 	// StopHandle contains channels for stopping and observing the stoppage of the reflector
 	// as well as err indicating why the reflector was stopped.
-	StopHandle *StopHandle
+	StopHandle
 }
 
 // ShouldResyncFunc is a type of function that indicates if a reflector should perform a
@@ -122,6 +122,8 @@ type Controller interface {
 
 // New makes a new Controller from the given Config.
 func New(c *Config) Controller {
+	// TODO: should we check here that the config's StopHandle isn't nil
+	// and set it if it is?
 	ctlr := &controller{
 		config: *c,
 		clock:  &clock.RealClock{},
@@ -132,12 +134,14 @@ func New(c *Config) Controller {
 // RunWithStopOptions begins processing items, and will continue until stopOptions recognizes a stop condition.
 // RunWithStopOptions blocks; call via go.
 func (c *controller) RunWithStopOptions(stopOptions StopOptions) {
+	// TODO: should we check here that the config's StopHandle isn't nil
+	// and set it if it is?
 	defer utilruntime.HandleCrash()
 	go func() {
 		<-c.config.StopHandle.Done()
 		c.config.Queue.Close()
 	}()
-	r := NewReflector(
+	r := NewReflectorWithStopHandle(
 		c.config.ListerWatcher,
 		c.config.ObjectType,
 		c.config.Queue,
@@ -171,11 +175,8 @@ func (c *controller) RunWithStopOptions(stopOptions StopOptions) {
 
 // Run supports calling RunWithStopOptions with just a stop channel
 // that when closed, is the only stop condition that will stop the controller.
-// TODO: see thoughts in shared_informer#Run on concerns with this pattern.
 func (c *controller) Run(stopCh <-chan struct{}) {
-	read, cancel := mergeChan(stopCh, c.config.StopHandle.Done())
-	defer cancel()
-	c.config.StopHandle.stopRead = read
+	defer c.config.StopHandle.MergeChan(stopCh)()
 	c.RunWithStopOptions(StopOptions{})
 }
 
@@ -413,6 +414,7 @@ func newInformer(
 		ObjectType:       objType,
 		FullResyncPeriod: resyncPeriod,
 		RetryOnError:     false,
+		StopHandle:       NewStopHandle(make(chan struct{})),
 
 		Process: func(obj interface{}) error {
 			// from oldest to newest
