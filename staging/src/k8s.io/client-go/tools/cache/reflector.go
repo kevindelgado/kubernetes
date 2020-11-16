@@ -234,6 +234,11 @@ var internalPackages = []string{"client-go/tools/cache/"}
 func (r *Reflector) RunWithStopOptions(stopOptions StopOptions) {
 	// TODO: should we populate stop handle if nil here to avoid panic?
 	klog.V(2).Infof("Starting reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
+	if stopOptions.ExternalStop != nil {
+		cancel := r.stopHandle.MergeChan(stopOptions.ExternalStop)
+		defer cancel()
+		stopOptions.ExternalStop = nil
+	}
 	wait.BackoffUntil(func() {
 		if err := r.ListAndWatch(r.stopHandle.Done()); err != nil {
 			r.watchErrorHandler(r, err)
@@ -254,7 +259,8 @@ func (r *Reflector) RunWithStopOptions(stopOptions StopOptions) {
 
 // Run calls RunWithStopOptions and only exits when stopCh is closed
 func (r *Reflector) Run(stopCh <-chan struct{}) {
-	defer r.stopHandle.MergeChan(stopCh)()
+	cancel := r.stopHandle.MergeChan(stopCh)
+	defer cancel()
 	r.RunWithStopOptions(StopOptions{
 		OnListError: func(err error) bool {
 			return false

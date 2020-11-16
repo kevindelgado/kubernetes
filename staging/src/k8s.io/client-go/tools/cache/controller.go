@@ -136,7 +136,13 @@ func New(c *Config) Controller {
 func (c *controller) RunWithStopOptions(stopOptions StopOptions) {
 	// TODO: should we check here that the config's StopHandle isn't nil
 	// and set it if it is?
+	// TODO: need to have tests for various external stop situations?
 	defer utilruntime.HandleCrash()
+	if stopOptions.ExternalStop != nil {
+		cancel := c.config.StopHandle.MergeChan(stopOptions.ExternalStop)
+		defer cancel()
+		stopOptions.ExternalStop = nil
+	}
 	go func() {
 		<-c.config.StopHandle.Done()
 		c.config.Queue.Close()
@@ -176,7 +182,8 @@ func (c *controller) RunWithStopOptions(stopOptions StopOptions) {
 // Run supports calling RunWithStopOptions with just a stop channel
 // that when closed, is the only stop condition that will stop the controller.
 func (c *controller) Run(stopCh <-chan struct{}) {
-	defer c.config.StopHandle.MergeChan(stopCh)()
+	cancel := c.config.StopHandle.MergeChan(stopCh)
+	defer cancel()
 	c.RunWithStopOptions(StopOptions{})
 }
 

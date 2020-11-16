@@ -90,6 +90,10 @@ type GraphBuilder struct {
 	// This channel is also protected by monitorLock.
 	stopCh <-chan struct{}
 
+	// stopOnListError determines whether to stop the informer
+	// when its reflector's ListAndWatch returns an error.
+	stopOnListError bool
+
 	// running tracks whether Run() has been called.
 	// it is protected by monitorLock.
 	running bool
@@ -125,8 +129,24 @@ type monitor struct {
 
 // Run is intended to be called in a goroutine. Multiple calls of this is an
 // error.
+// TODO: why is this exported? If it isn't meant to be, can we just delete Run
+// and only have RunWithStopOptions (which can be private)?
 func (m *monitor) Run() {
 	m.controller.Run(m.stopCh)
+}
+
+// RunWithStopOptions is intended to be called in a goroutine.
+// Multiple calls of this is an error.
+func (m *monitor) RunWithStopOptions(stopOnListError bool) {
+	// TODO: Is there a better way to pass the actual stopOptions?
+	// See my more fleshed out thoughts in the comment of NewGarbageCollector()
+	// (garbagecollector.go:76)
+	m.controller.RunWithStopOptions(cache.StopOptions{
+		ExternalStop: m.stopCh,
+		OnListError: func(error) bool {
+			return stopOnListError
+		},
+	})
 }
 
 type monitors map[schema.GroupVersionResource]*monitor
@@ -253,8 +273,8 @@ func (gb *GraphBuilder) startMonitors() {
 	for _, monitor := range monitors {
 		if monitor.stopCh == nil {
 			monitor.stopCh = make(chan struct{})
-			gb.sharedInformers.Start(gb.stopCh)
-			go monitor.Run()
+			gb.sharedInformers.StartWithStopOptions(gb.stopCh)
+			go monitor.RunWithStopOptions(gb.stopOnListError)
 			started++
 		}
 	}

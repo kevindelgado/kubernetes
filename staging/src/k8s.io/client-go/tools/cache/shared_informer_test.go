@@ -254,6 +254,7 @@ func TestResyncCheckPeriod(t *testing.T) {
 }
 
 func TestSharedInformerRemoveEventHandler(t *testing.T) {
+	// TODO:
 	// 1. Use Count to verify basic removal
 	// 2. Try to get us in a funky syncing handlers count and see that it works still
 

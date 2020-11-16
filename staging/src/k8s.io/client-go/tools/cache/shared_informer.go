@@ -170,6 +170,10 @@ type SharedInformer interface {
 	RunWithStopOptions(stopOptions StopOptions)
 	// Done returns a StopHandle that the caller can use to know when and why
 	// a shared informer has stopped.
+	// TODO: I don't love that the name of this is Done().
+	// 1. It creates stutter calling Done().Done()
+	// 2. It seems weird to call something called Done() in order to get a handle you can then call Close() on
+	// Open to any suggestions on better naming.
 	Done() StopHandle
 	// HasSynced returns true if the shared informer's store has been
 	// informed by at least one full LIST of the authoritative state
@@ -558,12 +562,23 @@ func (s *sharedIndexInformer) RunWithStopOptions(stopOptions StopOptions) {
 		s.stopped = true // Don't want any new listeners
 	}()
 
-	defer s.stopHandle.MergeChan(stopOptions.ExternalStop)()
+	cancel := s.stopHandle.MergeChan(stopOptions.ExternalStop)
+	defer cancel()
+	// TODO: Setting external stop to nil seems pretty weird.
+	// It's done because RunWithStopOptions is also publically
+	// exposed on the controller and reflector and we need to also
+	// merge the external stop if one is passed in there externally
+	// rather than from a call from here (sharedIndexInformer's Run).
+	//
+	// So in order to avoid re merging in controller and reflector,
+	// we nil it out after it's been merged, but maybe there's a cleaner way?
+	stopOptions.ExternalStop = nil
 	s.controller.RunWithStopOptions(stopOptions)
 }
 
 func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
-	defer s.stopHandle.MergeChan(stopCh)()
+	cancel := s.stopHandle.MergeChan(stopCh)
+	defer cancel()
 	s.RunWithStopOptions(StopOptions{
 		OnListError: func(err error) bool {
 			return false

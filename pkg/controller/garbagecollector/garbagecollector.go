@@ -79,6 +79,20 @@ type GarbageCollector struct {
 }
 
 // NewGarbageCollector creates a new GarbageCollector.
+// TODO: Thoughts on modifying the constructor to pass the stopOnListError bool?
+// I'm doing this because the graph_builder monitor runs a controller directly
+// (rather than via an informer). This requires us to generate stop options for it
+// rather than relying on the stop options baked into the informer factory
+// that get created in the controller manager.
+//
+// I don't like this for a couple of reasons:
+// 1. It feels like there should be a single source of truth for stop options,
+// rather than the stop options that get created in controllermanager for the
+// informer factory and the options that get created in monitor#Run()
+// 2. It doesn't seem right to need to modify the GC's constructor for this,
+// especially if stop options are to ever go beyond just a boolean
+// (i.e. using stopopts.OnListError for custom backoff logic or if we had other
+// stop options like OnZeroEventHandlers, etc).
 func NewGarbageCollector(
 	kubeClient clientset.Interface,
 	metadataClient metadata.Interface,
@@ -86,6 +100,7 @@ func NewGarbageCollector(
 	ignoredResources map[schema.GroupResource]struct{},
 	sharedInformers informerfactory.InformerFactory,
 	informersStarted <-chan struct{},
+	stopOnListError bool,
 ) (*GarbageCollector, error) {
 
 	eventBroadcaster := record.NewBroadcaster()
@@ -117,6 +132,7 @@ func NewGarbageCollector(
 		absentOwnerCache: absentOwnerCache,
 		sharedInformers:  sharedInformers,
 		ignoredResources: ignoredResources,
+		stopOnListError:  stopOnListError,
 	}
 
 	return gc, nil
