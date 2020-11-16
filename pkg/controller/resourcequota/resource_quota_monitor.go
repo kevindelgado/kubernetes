@@ -268,9 +268,9 @@ func (qm *QuotaMonitor) StartMonitors() {
 	for _, monitor := range monitors {
 		if monitor.stopCh == nil {
 			monitor.stopCh = make(chan struct{})
-			//qm.informerFactory.Start(qm.stopCh)
+			qm.informerFactory.Start(qm.stopCh)
 			// Use StopOptions for testing
-			qm.informerFactory.StartWithStopOptions(qm.stopCh)
+			//qm.informerFactory.StartWithStopOptions(qm.stopCh)
 			go monitor.Run()
 			started++
 		}

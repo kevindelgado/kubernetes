@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/metadata/metadatalister"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 )
 
 // NewSharedInformerFactory constructs a new instance of metadataSharedInformerFactory for all namespaces.
@@ -95,8 +96,14 @@ func (f *metadataSharedInformerFactory) Start(stopCh <-chan struct{}) {
 	defer f.lock.Unlock()
 
 	for informerType, informer := range f.informers {
+		informerType := informerType
+		informer := informer
 		if !f.startedInformers[informerType] {
-			go informer.Informer().Run(stopCh)
+			//go informer.Informer().Run(stopCh)
+			go func() {
+				informer.Informer().Run(stopCh)
+			}()
+
 			f.startedInformers[informerType] = true
 		}
 	}
@@ -125,12 +132,16 @@ func (f *metadataSharedInformerFactory) StartWithStopOptions(stopCh <-chan struc
 		OnListError:  onListError,
 	}
 	for informerType, informer := range f.informers {
+		informerType := informerType
+		informer := informer
 		if !f.startedInformers[informerType] {
 			go func() {
 				defer f.informerStopped(informerType)
+				klog.V(4).Infof("metainformer starting WSO")
 				informer.Informer().RunWithStopOptions(stopOptions)
 				<-informer.Informer().Done().Done()
 			}()
+			f.startedInformers[informerType] = true
 		}
 	}
 
@@ -138,6 +149,7 @@ func (f *metadataSharedInformerFactory) StartWithStopOptions(stopCh <-chan struc
 
 // WaitForCacheSync waits for all started informers' cache were synced.
 func (f *metadataSharedInformerFactory) WaitForCacheSync(stopCh <-chan struct{}) map[schema.GroupVersionResource]bool {
+	klog.V(4).Infof("meta WFCS begin")
 	informers := func() map[schema.GroupVersionResource]cache.SharedIndexInformer {
 		f.lock.Lock()
 		defer f.lock.Unlock()
@@ -155,6 +167,7 @@ func (f *metadataSharedInformerFactory) WaitForCacheSync(stopCh <-chan struct{})
 	for informType, informer := range informers {
 		res[informType] = cache.WaitForCacheSync(stopCh, informer.HasSynced)
 	}
+	klog.V(4).Infof("meta WFCS end")
 	return res
 }
 

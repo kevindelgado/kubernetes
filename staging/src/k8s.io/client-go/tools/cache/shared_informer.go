@@ -515,6 +515,7 @@ func (s *sharedIndexInformer) Done() StopHandle {
 }
 
 func (s *sharedIndexInformer) RunWithStopOptions(stopOptions StopOptions) {
+	//klog.V(4).Infof("inside %s", "RWSO on sharedIndexInf")
 	defer utilruntime.HandleCrash()
 
 	fifo := NewDeltaFIFOWithOptions(DeltaFIFOOptions{
@@ -558,12 +559,16 @@ func (s *sharedIndexInformer) RunWithStopOptions(stopOptions StopOptions) {
 		s.stopped = true // Don't want any new listeners
 	}()
 
-	defer s.stopHandle.MergeChan(stopOptions.ExternalStop)()
+	cancel := s.stopHandle.MergeChan(stopOptions.ExternalStop)
+	defer cancel()
+	// TODO: Should we nil this out, because controller and reflector also check?
+	stopOptions.ExternalStop = nil
 	s.controller.RunWithStopOptions(stopOptions)
 }
 
 func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
-	defer s.stopHandle.MergeChan(stopCh)()
+	cancel := s.stopHandle.MergeChan(stopCh)
+	defer cancel()
 	s.RunWithStopOptions(StopOptions{
 		OnListError: func(err error) bool {
 			return false

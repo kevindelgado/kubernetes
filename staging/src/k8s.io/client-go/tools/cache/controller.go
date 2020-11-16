@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/clock"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog/v2"
 )
 
 // This file implements a low-level controller that is used in
@@ -136,7 +137,13 @@ func New(c *Config) Controller {
 func (c *controller) RunWithStopOptions(stopOptions StopOptions) {
 	// TODO: should we check here that the config's StopHandle isn't nil
 	// and set it if it is?
+	// TODO: need to have tests for various external stop situations
 	defer utilruntime.HandleCrash()
+	if stopOptions.ExternalStop != nil {
+		cancel := c.config.StopHandle.MergeChan(stopOptions.ExternalStop)
+		defer cancel()
+		stopOptions.ExternalStop = nil
+	}
 	go func() {
 		<-c.config.StopHandle.Done()
 		c.config.Queue.Close()
@@ -163,6 +170,7 @@ func (c *controller) RunWithStopOptions(stopOptions StopOptions) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		klog.V(4).Infof("controller starting reflector")
 		r.RunWithStopOptions(stopOptions)
 	}()
 
@@ -176,7 +184,8 @@ func (c *controller) RunWithStopOptions(stopOptions StopOptions) {
 // Run supports calling RunWithStopOptions with just a stop channel
 // that when closed, is the only stop condition that will stop the controller.
 func (c *controller) Run(stopCh <-chan struct{}) {
-	defer c.config.StopHandle.MergeChan(stopCh)()
+	cancel := c.config.StopHandle.MergeChan(stopCh)
+	defer cancel()
 	c.RunWithStopOptions(StopOptions{})
 }
 
@@ -208,10 +217,12 @@ func (c *controller) processLoop() {
 		obj, err := c.config.Queue.Pop(PopProcessFunc(c.config.Process))
 		if err != nil {
 			if err == ErrFIFOClosed {
+				klog.V(4).Infof("processLoop errfifoclosed")
 				return
 			}
 			if c.config.RetryOnError {
 				// This is the safe way to re-enqueue.
+				klog.V(4).Infof("processLoop requeue")
 				c.config.Queue.AddIfNotPresent(obj)
 			}
 		}

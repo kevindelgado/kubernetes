@@ -122,6 +122,16 @@ func (m *monitor) Run() {
 	m.controller.Run(m.stopCh)
 }
 
+func (m *monitor) RunWithStopOptions() {
+	// TODO: bubble the stopopts up to here so we're not hardcoding them?
+	m.controller.RunWithStopOptions(cache.StopOptions{
+		ExternalStop: m.stopCh,
+		OnListError: func(error) bool {
+			return true
+		},
+	})
+}
+
 type monitors map[schema.GroupVersionResource]*monitor
 
 func (gb *GraphBuilder) controllerFor(resource schema.GroupVersionResource, kind schema.GroupVersionKind) (cache.Controller, cache.Store, error) {
@@ -243,14 +253,19 @@ func (gb *GraphBuilder) startMonitors() {
 
 	monitors := gb.monitors
 	started := 0
-	for _, monitor := range monitors {
+	for gv, monitor := range monitors {
+		klog.V(4).Infof("monitor it %+v, len: %d, monitor: %v", gv, len(monitors), monitor)
 		if monitor.stopCh == nil {
+			klog.V(4).Infof("stopCh nil")
 			monitor.stopCh = make(chan struct{})
-			gb.sharedInformers.Start(gb.stopCh)
-			go monitor.Run()
+			//gb.sharedInformers.Start(gb.stopCh)
+			gb.sharedInformers.StartWithStopOptions(gb.stopCh)
+			//go monitor.Run()
+			go monitor.RunWithStopOptions()
 			started++
 		}
 	}
+	// TODO:kdelga: why does vanilla run this before any reflectors get started?
 	klog.V(4).Infof("started %d new monitors, %d currently running", started, len(monitors))
 }
 
@@ -518,12 +533,15 @@ func (gb *GraphBuilder) processTransitions(oldObj interface{}, newAccessor metav
 }
 
 func (gb *GraphBuilder) runProcessGraphChanges() {
+	klog.V(4).Infof("inside %s", "runProcessGraphChanges start loop")
 	for gb.processGraphChanges() {
 	}
+	klog.V(4).Infof("inside %s", "runProcessGraphChanges end loop")
 }
 
 // Dequeueing an event from graphChanges, updating graph, populating dirty_queue.
 func (gb *GraphBuilder) processGraphChanges() bool {
+	klog.V(4).Infof("inside %s", "processGraphChanges")
 	item, quit := gb.graphChanges.Get()
 	if quit {
 		return false

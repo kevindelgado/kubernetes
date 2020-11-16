@@ -141,6 +141,8 @@ func (f *sharedInformerFactory) Start(stopCh <-chan struct{}) {
 	defer f.lock.Unlock()
 
 	for informerType, informer := range f.informers {
+		informerType := informerType
+		informer := informer
 		if !f.startedInformers[informerType] {
 			go informer.Run(stopCh)
 			f.startedInformers[informerType] = true
@@ -177,6 +179,8 @@ func (f *sharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
 		OnListError:  onListError,
 	}
 	for informerType, informer := range f.informers {
+		informerType := informerType
+		informer := informer
 		if !f.startedInformers[informerType] {
 			go func() {
 				defer f.informerStopped(informerType)
@@ -185,6 +189,7 @@ func (f *sharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
 				// block on its own?
 				<-informer.Done().Done()
 			}()
+			f.startedInformers[informerType] = true
 		}
 	}
 }
