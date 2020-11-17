@@ -344,6 +344,9 @@ type ControllerContext struct {
 	// multiple controllers don't get into lock-step and all hammer the apiserver
 	// with list requests simultaneously.
 	ResyncPeriod func() time.Duration
+
+	// StopOnListError determines whether to stop the informer when the reflector's ListAndWatch returns an error
+	StopOnListError bool
 }
 
 // IsControllerEnabled checks if the context's controllers enabled or not
@@ -464,13 +467,10 @@ func GetAvailableResources(clientBuilder clientbuilder.ControllerClientBuilder) 
 func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clientBuilder clientbuilder.ControllerClientBuilder, stop <-chan struct{}) (ControllerContext, error) {
 	versionedClient := rootClientBuilder.ClientOrDie("shared-informers")
 	// TODO: modified to test new informer interface
-	// sharedInformers := informers.NewSharedInformerFactory(versionedClient, ResyncPeriod(s)())
-	onListErr := func(error) bool { return true }
+	onListErr := func(error) bool { return s.ComponentConfig.Generic.StopOnListError }
 	sharedInformers := informers.NewSharedInformerFactoryWithOptions(versionedClient, ResyncPeriod(s)(), informers.WithOnListError(onListErr))
 
 	metadataClient := metadata.NewForConfigOrDie(rootClientBuilder.ConfigOrDie("metadata-informers"))
-	// metadataInformers := metadatainformer.NewSharedInformerFactory(metadataClient, ResyncPeriod(s)())
-	// TODO: modified to test new informer interface
 	metadataInformers := metadatainformer.NewStoppableSharedInformerFactory(metadataClient, ResyncPeriod(s)(), metav1.NamespaceAll, nil, onListErr)
 
 	// If apiserver is not running we should wait for some time and fail only then. This is particularly
@@ -510,6 +510,7 @@ func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clien
 		Stop:                            stop,
 		InformersStarted:                make(chan struct{}),
 		ResyncPeriod:                    ResyncPeriod(s),
+		StopOnListError:                 s.ComponentConfig.Generic.StopOnListError,
 	}
 	return ctx, nil
 }

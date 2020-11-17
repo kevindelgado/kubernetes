@@ -85,6 +85,10 @@ type GraphBuilder struct {
 	// This channel is also protected by monitorLock.
 	stopCh <-chan struct{}
 
+	// stopOnListError determines whether to stop the informer
+	// when its reflector's ListAndWatch returns an error.
+	stopOnListError bool
+
 	// running tracks whether Run() has been called.
 	// it is protected by monitorLock.
 	running bool
@@ -118,16 +122,20 @@ type monitor struct {
 
 // Run is intended to be called in a goroutine. Multiple calls of this is an
 // error.
+// TODO: why is this exported? If it isn't meant to be, can we just delete Run
+// and only have RunWithStopOptions (which can be private)?
 func (m *monitor) Run() {
 	m.controller.Run(m.stopCh)
 }
 
-func (m *monitor) RunWithStopOptions() {
-	// TODO: bubble the stopopts up to here so we're not hardcoding them?
+// RunWithStopOptions is intended to be called in a goroutine.
+// Multiple calls of this is an error.
+func (m *monitor) RunWithStopOptions(stopOnListError bool) {
+	// TODO: better way to pass the actual stopOptions?
 	m.controller.RunWithStopOptions(cache.StopOptions{
 		ExternalStop: m.stopCh,
 		OnListError: func(error) bool {
-			return true
+			return stopOnListError
 		},
 	})
 }
@@ -258,14 +266,11 @@ func (gb *GraphBuilder) startMonitors() {
 		if monitor.stopCh == nil {
 			klog.V(4).Infof("stopCh nil")
 			monitor.stopCh = make(chan struct{})
-			//gb.sharedInformers.Start(gb.stopCh)
 			gb.sharedInformers.StartWithStopOptions(gb.stopCh)
-			//go monitor.Run()
-			go monitor.RunWithStopOptions()
+			go monitor.RunWithStopOptions(gb.stopOnListError)
 			started++
 		}
 	}
-	// TODO:kdelga: why does vanilla run this before any reflectors get started?
 	klog.V(4).Infof("started %d new monitors, %d currently running", started, len(monitors))
 }
 

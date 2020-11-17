@@ -515,7 +515,6 @@ func (s *sharedIndexInformer) Done() StopHandle {
 }
 
 func (s *sharedIndexInformer) RunWithStopOptions(stopOptions StopOptions) {
-	//klog.V(4).Infof("inside %s", "RWSO on sharedIndexInf")
 	defer utilruntime.HandleCrash()
 
 	fifo := NewDeltaFIFOWithOptions(DeltaFIFOOptions{
@@ -561,7 +560,14 @@ func (s *sharedIndexInformer) RunWithStopOptions(stopOptions StopOptions) {
 
 	cancel := s.stopHandle.MergeChan(stopOptions.ExternalStop)
 	defer cancel()
-	// TODO: Should we nil this out, because controller and reflector also check?
+	// TODO: Setting external stop to nil seems pretty weird.
+	// It's done because RunWithStopOptions is also publically
+	// exposed on the controller and reflector and we need to also
+	// merge the external stop if one is passed in there externally
+	// rather than from a call from here (sharedIndexInformer's Run).
+	//
+	// So in order to avoid re merging in controller and reflector,
+	// we nil it out after it's been merged, but maybe there's a cleaner way?
 	stopOptions.ExternalStop = nil
 	s.controller.RunWithStopOptions(stopOptions)
 }

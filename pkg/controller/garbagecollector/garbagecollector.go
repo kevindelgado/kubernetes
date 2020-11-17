@@ -79,6 +79,7 @@ func NewGarbageCollector(
 	ignoredResources map[schema.GroupResource]struct{},
 	sharedInformers informerfactory.InformerFactory,
 	informersStarted <-chan struct{},
+	stopOnListError bool,
 ) (*GarbageCollector, error) {
 	attemptToDelete := workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "garbage_collector_attempt_to_delete")
 	attemptToOrphan := workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "garbage_collector_attempt_to_orphan")
@@ -103,6 +104,7 @@ func NewGarbageCollector(
 		absentOwnerCache: absentOwnerCache,
 		sharedInformers:  sharedInformers,
 		ignoredResources: ignoredResources,
+		stopOnListError:  stopOnListError,
 	}
 
 	return gc, nil

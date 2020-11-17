@@ -239,6 +239,10 @@ func (f *sharedInformerFactory) InformerFor(obj runtime.Object, newFunc internal
 	return informer
 }
 
+func (f *sharedInformerFactory) OnListError() cache.OnListErrorFunc {
+	return f.onListError
+}
+
 // SharedInformerFactory provides shared informers for resources in all known
 // API group versions.
 type SharedInformerFactory interface {
