@@ -40,6 +40,13 @@ func NewDynamicSharedInformerFactory(client dynamic.Interface, defaultResync tim
 // NewFilteredDynamicSharedInformerFactory constructs a new instance of dynamicSharedInformerFactory.
 // Listers obtained via this factory will be subject to the same filters as specified here.
 func NewFilteredDynamicSharedInformerFactory(client dynamic.Interface, defaultResync time.Duration, namespace string, tweakListOptions TweakListOptionsFunc) DynamicSharedInformerFactory {
+	return NewStoppableDynamicSharedInformerFactory(client, defaultResync, namespace, tweakListOptions, nil)
+}
+
+// NewStoppablejDynamicSharedInformerFactory constructs a new instance of dynamicSharedInformerFactory.
+// It runs with customizable stop options.
+// TODO: Consider using a factory instead of ballooning constructors.
+func NewStoppableDynamicSharedInformerFactory(client dynamic.Interface, defaultResync time.Duration, namespace string, tweakListOptions TweakListOptionsFunc, onListError cache.OnListErrorFunc) DynamicSharedInformerFactory {
 	return &dynamicSharedInformerFactory{
 		client:           client,
 		defaultResync:    defaultResync,
@@ -47,6 +54,7 @@ func NewFilteredDynamicSharedInformerFactory(client dynamic.Interface, defaultRe
 		informers:        map[schema.GroupVersionResource]informers.GenericInformer{},
 		startedInformers: make(map[schema.GroupVersionResource]bool),
 		tweakListOptions: tweakListOptions,
+		onListError:      onListError,
 	}
 }
 
@@ -61,6 +69,7 @@ type dynamicSharedInformerFactory struct {
 	// This allows Start() to be called multiple times safely.
 	startedInformers map[schema.GroupVersionResource]bool
 	tweakListOptions TweakListOptionsFunc
+	onListError      cache.OnListErrorFunc
 }
 
 var _ DynamicSharedInformerFactory = &dynamicSharedInformerFactory{}
@@ -92,6 +101,43 @@ func (f *dynamicSharedInformerFactory) Start(stopCh <-chan struct{}) {
 			f.startedInformers[informerType] = true
 		}
 	}
+}
+
+func (f *dynamicSharedInformerFactory) informerStopped(informerType schema.GroupVersionResource) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	delete(f.startedInformers, informerType)
+	delete(f.informers, informerType)
+}
+
+// StartWithStopOptions initializes all requested informers with their stop options.
+func (f *dynamicSharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	onListError := func(error) bool {
+		return false
+	}
+	if f.onListError != nil {
+		onListError = f.onListError
+	}
+	stopOptions := cache.StopOptions{
+		ExternalStop: stopCh,
+		OnListError:  onListError,
+	}
+	for informerType, informer := range f.informers {
+		informerType := informerType
+		informer := informer
+		if !f.startedInformers[informerType] {
+			go func() {
+				defer f.informerStopped(informerType)
+				informer.Informer().RunWithStopOptions(stopOptions)
+				<-informer.Informer().Done().Done()
+			}()
+			f.startedInformers[informerType] = true
+		}
+	}
+
 }
 
 // WaitForCacheSync waits for all started informers' cache were synced.

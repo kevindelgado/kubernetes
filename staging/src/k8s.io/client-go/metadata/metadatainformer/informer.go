@@ -95,13 +95,8 @@ func (f *metadataSharedInformerFactory) Start(stopCh <-chan struct{}) {
 	defer f.lock.Unlock()
 
 	for informerType, informer := range f.informers {
-		informerType := informerType
-		informer := informer
 		if !f.startedInformers[informerType] {
-			go func() {
-				informer.Informer().Run(stopCh)
-			}()
-
+			go informer.Informer().Run(stopCh)
 			f.startedInformers[informerType] = true
 		}
 	}
