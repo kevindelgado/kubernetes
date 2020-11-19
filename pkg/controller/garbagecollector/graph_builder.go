@@ -121,32 +121,6 @@ type GraphBuilder struct {
 type monitor struct {
 	controller cache.Controller
 	store      cache.Store
-
-	// stopCh stops Controller. If stopCh is nil, the monitor is considered to be
-	// not yet started.
-	stopCh chan struct{}
-}
-
-// Run is intended to be called in a goroutine. Multiple calls of this is an
-// error.
-// TODO: why is this exported? If it isn't meant to be, can we just delete Run
-// and only have RunWithStopOptions (which can be private)?
-func (m *monitor) Run() {
-	m.controller.Run(m.stopCh)
-}
-
-// RunWithStopOptions is intended to be called in a goroutine.
-// Multiple calls of this is an error.
-func (m *monitor) RunWithStopOptions(stopOnListError bool) {
-	// TODO: Is there a better way to pass the actual stopOptions?
-	// See my more fleshed out thoughts in the comment of NewGarbageCollector()
-	// (garbagecollector.go:76)
-	m.controller.RunWithStopOptions(cache.StopOptions{
-		ExternalStop: m.stopCh,
-		OnListError: func(error) bool {
-			return stopOnListError
-		},
-	})
 }
 
 type monitors map[schema.GroupVersionResource]*monitor
@@ -240,11 +214,11 @@ func (gb *GraphBuilder) syncMonitors(resources map[schema.GroupVersionResource]s
 	}
 	gb.monitors = current
 
-	for _, monitor := range toRemove {
-		if monitor.stopCh != nil {
-			close(monitor.stopCh)
-		}
-	}
+	//for _, monitor := range toRemove {
+	//	if monitor.stopCh != nil {
+	//		close(monitor.stopCh)
+	//	}
+	//}
 
 	klog.V(4).Infof("synced monitors; added %d, kept %d, removed %d", added, kept, len(toRemove))
 	// NewAggregate returns nil if errs is 0-length
@@ -267,18 +241,8 @@ func (gb *GraphBuilder) startMonitors() {
 	// we're waiting until after the informer start that happens once all the controllers are initialized.  This ensures
 	// that they don't get unexpected events on their work queues.
 	<-gb.informersStarted
-
-	monitors := gb.monitors
-	started := 0
-	for _, monitor := range monitors {
-		if monitor.stopCh == nil {
-			monitor.stopCh = make(chan struct{})
-			gb.sharedInformers.StartWithStopOptions(gb.stopCh)
-			go monitor.RunWithStopOptions(gb.stopOnListError)
-			started++
-		}
-	}
-	klog.V(4).Infof("started %d new monitors, %d currently running", started, len(monitors))
+	gb.sharedInformers.StartWithStopOptions(gb.stopCh)
+	klog.V(4).Infof("all %d monitors have been started", len(gb.monitors))
 }
 
 // IsSynced returns true if any monitors exist AND all those monitors'
@@ -320,21 +284,8 @@ func (gb *GraphBuilder) Run(stopCh <-chan struct{}) {
 	gb.startMonitors()
 	wait.Until(gb.runProcessGraphChanges, 1*time.Second, stopCh)
 
-	// Stop any running monitors.
-	gb.monitorLock.Lock()
-	defer gb.monitorLock.Unlock()
-	monitors := gb.monitors
-	stopped := 0
-	for _, monitor := range monitors {
-		if monitor.stopCh != nil {
-			stopped++
-			close(monitor.stopCh)
-		}
-	}
-
 	// reset monitors so that the graph builder can be safely re-run/synced.
 	gb.monitors = nil
-	klog.Infof("stopped %d of %d monitors", stopped, len(monitors))
 }
 
 var ignoredResources = map[schema.GroupResource]struct{}{
