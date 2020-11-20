@@ -471,6 +471,10 @@ type dummyController struct {
 	informer *sharedIndexInformer
 }
 
+// TODO: Are these necessary now that GC controller doesn't call Run on the controller it gets back?
+// Is GetController still used anywhere.
+// I guess HasSynced is still used, but maybe we should expose that
+// on the factory somehow instead?
 func (v *dummyController) Run(stopCh <-chan struct{}) {
 }
 

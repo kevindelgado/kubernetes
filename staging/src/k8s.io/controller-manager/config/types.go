@@ -46,10 +46,6 @@ type GenericControllerManagerConfiguration struct {
 	Controllers []string
 	// DebuggingConfiguration holds configuration for Debugging related features.
 	Debugging componentbaseconfig.DebuggingConfiguration
-	// StopOnListError determines whether the shared informers should stop themselves
-	// when their reflector's ListAndWatch call errors out
-	// TODO: A better way to config this than via a flag?
-	StopOnListError bool
 }
 
 // LeaderMigrationConfiguration provides versioned configuration for all migrating leader locks.

@@ -31,7 +31,6 @@ import (
 
 	"github.com/spf13/cobra"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -346,9 +345,6 @@ type ControllerContext struct {
 	// multiple controllers don't get into lock-step and all hammer the apiserver
 	// with list requests simultaneously.
 	ResyncPeriod func() time.Duration
-
-	// StopOnListError determines whether to stop the informer when the reflector's ListAndWatch returns an error
-	StopOnListError bool
 }
 
 // IsControllerEnabled checks if the context's controllers enabled or not
@@ -472,13 +468,13 @@ func GetAvailableResources(clientBuilder clientbuilder.ControllerClientBuilder) 
 // the shared-informers client and token controller.
 func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clientBuilder clientbuilder.ControllerClientBuilder, stop <-chan struct{}) (ControllerContext, error) {
 	versionedClient := rootClientBuilder.ClientOrDie("shared-informers")
-	// TODO: Is there a better way to pass this rather than as a global flag on the config?
-	onListErr := func(error) bool { return s.ComponentConfig.Generic.StopOnListError }
+
+	// always stop informers when the ListAndWatch errors out
+	onListErr := func(error) bool { return true }
 	sharedInformers := informers.NewSharedInformerFactoryWithOptions(versionedClient, ResyncPeriod(s)(), informers.WithOnListError(onListErr))
 
 	metadataClient := metadata.NewForConfigOrDie(rootClientBuilder.ConfigOrDie("metadata-informers"))
-	metadataInformers := metadatainformer.NewStoppableSharedInformerFactory(metadataClient, ResyncPeriod(s)(), metav1.NamespaceAll, nil, onListErr)
-
+	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, ResyncPeriod(s)(), metadatainformer.WithOnListError(onListErr))
 	// If apiserver is not running we should wait for some time and fail only then. This is particularly
 	// important when we start apiserver and controller manager at the same time.
 	if err := genericcontrollermanager.WaitForAPIServer(versionedClient, 10*time.Second); err != nil {
@@ -516,7 +512,6 @@ func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clien
 		Stop:                            stop,
 		InformersStarted:                make(chan struct{}),
 		ResyncPeriod:                    ResyncPeriod(s),
-		StopOnListError:                 s.ComponentConfig.Generic.StopOnListError,
 	}
 	return ctx, nil
 }
