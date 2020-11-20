@@ -256,7 +256,7 @@ func TestStoppableDynamicSharedInformerFactory(t *testing.T) {
 		return true
 	}
 	fakeClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), []runtime.Object{}...)
-	target := dynamicinformer.NewStoppableDynamicSharedInformerFactory(fakeClient, 0, metav1.NamespaceAll, nil, onListErrorFunc)
+	target := dynamicinformer.NewDynamicSharedInformerFactoryWithOptions(fakeClient, 0, dynamicinformer.WithOnListError(onListErrorFunc))
 
 	gvr := schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"}
 	informerListerForGvr := target.ForResource(gvr)

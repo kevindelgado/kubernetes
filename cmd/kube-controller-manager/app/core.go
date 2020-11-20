@@ -559,7 +559,6 @@ func startGarbageCollectorController(ctx ControllerContext) (http.Handler, bool,
 		ignoredResources,
 		ctx.ObjectOrMetadataInformerFactory,
 		ctx.InformersStarted,
-		ctx.StopOnListError,
 	)
 	if err != nil {
 		return nil, true, fmt.Errorf("failed to start the generic garbage collector: %v", err)

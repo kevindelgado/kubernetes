@@ -124,7 +124,6 @@ func autoConvert_config_GenericControllerManagerConfiguration_To_v1alpha1_Generi
 	if err := configv1alpha1.Convert_config_DebuggingConfiguration_To_v1alpha1_DebuggingConfiguration(&in.Debugging, &out.Debugging, s); err != nil {
 		return err
 	}
-	// WARNING: in.StopOnListError requires manual conversion: does not exist in peer-type
 	return nil
 }
 

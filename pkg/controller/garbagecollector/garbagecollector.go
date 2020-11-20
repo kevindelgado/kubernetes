@@ -100,7 +100,6 @@ func NewGarbageCollector(
 	ignoredResources map[schema.GroupResource]struct{},
 	sharedInformers informerfactory.InformerFactory,
 	informersStarted <-chan struct{},
-	stopOnListError bool,
 ) (*GarbageCollector, error) {
 
 	eventBroadcaster := record.NewBroadcaster()
@@ -132,7 +131,6 @@ func NewGarbageCollector(
 		absentOwnerCache: absentOwnerCache,
 		sharedInformers:  sharedInformers,
 		ignoredResources: ignoredResources,
-		stopOnListError:  stopOnListError,
 	}
 
 	return gc, nil

@@ -164,7 +164,7 @@ func TestStoppableMetadataSharedInformerFactory(t *testing.T) {
 		return true
 	}
 	fakeClient := fake.NewSimpleMetadataClient(runtime.NewScheme(), []runtime.Object{}...)
-	target := NewStoppableSharedInformerFactory(fakeClient, 0, metav1.NamespaceAll, nil, onListErrorFunc)
+	target := NewSharedInformerFactoryWithOptions(fakeClient, 0, WithOnListError(onListErrorFunc))
 
 	gvr := schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"}
 	informerListerForGvr := target.ForResource(gvr)

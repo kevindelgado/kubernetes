@@ -57,7 +57,6 @@ func (o *GenericControllerManagerConfigurationOptions) AddFlags(fss *cliflag.Nam
 	genericfs.Float32Var(&o.ClientConnection.QPS, "kube-api-qps", o.ClientConnection.QPS, "QPS to use while talking with kubernetes apiserver.")
 	genericfs.Int32Var(&o.ClientConnection.Burst, "kube-api-burst", o.ClientConnection.Burst, "Burst to use while talking with kubernetes apiserver.")
 	genericfs.DurationVar(&o.ControllerStartInterval.Duration, "controller-start-interval", o.ControllerStartInterval.Duration, "Interval between starting controller managers.")
-	genericfs.BoolVar(&o.StopOnListError, "stop-on-list-error", o.StopOnListError, "Should the shared informers terminate when reflector ListAndWatch errors out")
 	genericfs.StringSliceVar(&o.Controllers, "controllers", o.Controllers, fmt.Sprintf(""+
 		"A list of controllers to enable. '*' enables all on-by-default controllers, 'foo' enables the controller "+
 		"named 'foo', '-foo' disables the controller named 'foo'.\nAll controllers: %s\nDisabled-by-default controllers: %s",
@@ -81,7 +80,6 @@ func (o *GenericControllerManagerConfigurationOptions) ApplyTo(cfg *cmconfig.Gen
 	cfg.MinResyncPeriod = o.MinResyncPeriod
 	cfg.ClientConnection = o.ClientConnection
 	cfg.ControllerStartInterval = o.ControllerStartInterval
-	cfg.StopOnListError = o.StopOnListError
 	cfg.LeaderElection = o.LeaderElection
 	cfg.Controllers = o.Controllers
 

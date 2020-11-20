@@ -32,31 +32,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// NewDynamicSharedInformerFactory constructs a new instance of dynamicSharedInformerFactory for all namespaces.
-func NewDynamicSharedInformerFactory(client dynamic.Interface, defaultResync time.Duration) DynamicSharedInformerFactory {
-	return NewFilteredDynamicSharedInformerFactory(client, defaultResync, metav1.NamespaceAll, nil)
-}
-
-// NewFilteredDynamicSharedInformerFactory constructs a new instance of dynamicSharedInformerFactory.
-// Listers obtained via this factory will be subject to the same filters as specified here.
-func NewFilteredDynamicSharedInformerFactory(client dynamic.Interface, defaultResync time.Duration, namespace string, tweakListOptions TweakListOptionsFunc) DynamicSharedInformerFactory {
-	return NewStoppableDynamicSharedInformerFactory(client, defaultResync, namespace, tweakListOptions, nil)
-}
-
-// NewStoppablejDynamicSharedInformerFactory constructs a new instance of dynamicSharedInformerFactory.
-// It runs with customizable stop options.
-// TODO: Consider using a factory instead of ballooning constructors.
-func NewStoppableDynamicSharedInformerFactory(client dynamic.Interface, defaultResync time.Duration, namespace string, tweakListOptions TweakListOptionsFunc, onListError cache.OnListErrorFunc) DynamicSharedInformerFactory {
-	return &dynamicSharedInformerFactory{
-		client:           client,
-		defaultResync:    defaultResync,
-		namespace:        namespace,
-		informers:        map[schema.GroupVersionResource]informers.GenericInformer{},
-		startedInformers: make(map[schema.GroupVersionResource]bool),
-		tweakListOptions: tweakListOptions,
-		onListError:      onListError,
-	}
-}
+// DynamicSharedInformerOption defines the functional option type for SharedInformerFactory.
+type DynamicSharedInformerOption func(*dynamicSharedInformerFactory) *dynamicSharedInformerFactory
 
 type dynamicSharedInformerFactory struct {
 	client        dynamic.Interface
@@ -73,6 +50,62 @@ type dynamicSharedInformerFactory struct {
 }
 
 var _ DynamicSharedInformerFactory = &dynamicSharedInformerFactory{}
+
+// WithOnListErr sets the onListErrFunc that is added to the stop options
+// when calling StartWithStopOptions.
+// This method results in every informer in this factory getting the same stop options.
+func WithOnListError(onListError cache.OnListErrorFunc) DynamicSharedInformerOption {
+	return func(factory *dynamicSharedInformerFactory) *dynamicSharedInformerFactory {
+		factory.onListError = onListError
+		return factory
+	}
+}
+
+// WithTweakListOptions sets a custom filter on all listers of the configured SharedInformerFactory.
+func WithTweakListOptions(tweakListOptions TweakListOptionsFunc) DynamicSharedInformerOption {
+	return func(factory *dynamicSharedInformerFactory) *dynamicSharedInformerFactory {
+		factory.tweakListOptions = tweakListOptions
+		return factory
+	}
+}
+
+// WithNamespace limits the SharedInformerFactory to the specified namespace.
+func WithNamespace(namespace string) DynamicSharedInformerOption {
+	return func(factory *dynamicSharedInformerFactory) *dynamicSharedInformerFactory {
+		factory.namespace = namespace
+		return factory
+	}
+}
+
+// NewDynamicSharedInformerFactory constructs a new instance of dynamicSharedInformerFactory for all namespaces.
+func NewDynamicSharedInformerFactory(client dynamic.Interface, defaultResync time.Duration) DynamicSharedInformerFactory {
+	return NewDynamicSharedInformerFactoryWithOptions(client, defaultResync)
+}
+
+// NewFilteredDynamicSharedInformerFactory constructs a new instance of dynamicSharedInformerFactory.
+// Listers obtained via this factory will be subject to the same filters as specified here.
+// Deprecated: Please use NewDynamicSharedInformerFactoryWithOptions instead
+func NewFilteredDynamicSharedInformerFactory(client dynamic.Interface, defaultResync time.Duration, namespace string, tweakListOptions TweakListOptionsFunc) DynamicSharedInformerFactory {
+	return NewDynamicSharedInformerFactoryWithOptions(client, defaultResync, WithNamespace(namespace), WithTweakListOptions(tweakListOptions))
+}
+
+// NewDynamicSharedInformerFactoryWithOptions constructs a new instance of a dynamicSharedInformerFactory with additional options.
+func NewDynamicSharedInformerFactoryWithOptions(client dynamic.Interface, defaultResync time.Duration, options ...DynamicSharedInformerOption) DynamicSharedInformerFactory {
+	factory := &dynamicSharedInformerFactory{
+		client:           client,
+		defaultResync:    defaultResync,
+		namespace:        metav1.NamespaceAll,
+		informers:        map[schema.GroupVersionResource]informers.GenericInformer{},
+		startedInformers: make(map[schema.GroupVersionResource]bool),
+	}
+
+	// Apply all options
+	for _, opt := range options {
+		factory = opt(factory)
+	}
+
+	return factory
+}
 
 func (f *dynamicSharedInformerFactory) ForResource(gvr schema.GroupVersionResource) informers.GenericInformer {
 	f.lock.Lock()
