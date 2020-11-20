@@ -18,20 +18,18 @@ require (
 	github.com/google/uuid v1.1.2
 	github.com/googleapis/gnostic v0.4.1
 	github.com/gregjones/httpcache v0.0.0-20180305231024-9cad4c3443a7
-	github.com/hashicorp/golang-lru v0.5.4 // indirect
-	github.com/imdario/mergo v0.3.9
-	github.com/onsi/gomega v1.10.1 // indirect
+	github.com/imdario/mergo v0.3.5
 	github.com/peterbourgon/diskv v2.0.1+incompatible
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.6.1
 	golang.org/x/crypto v0.0.0-20201002170205-7f63de1d35b0
 	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b
 	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
-	golang.org/x/time v0.0.0-20191024005414-555d28b269f0
-	k8s.io/api v0.18.6
-	k8s.io/apimachinery v0.18.6
+	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e
+	k8s.io/api v0.0.0
+	k8s.io/apimachinery v0.0.0
 	k8s.io/klog/v2 v2.4.0
-	k8s.io/utils v0.0.0-20200729134348-d5654de09c73
+	k8s.io/utils v0.0.0-20201110183641-67b214c5f920
 	sigs.k8s.io/yaml v1.2.0
 )
 
