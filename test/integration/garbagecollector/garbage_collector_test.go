@@ -242,8 +242,9 @@ func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, work
 	if err != nil {
 		t.Fatalf("failed to create dynamicClient: %v", err)
 	}
-	sharedInformers := informers.NewSharedInformerFactory(clientSet, 0)
-	metadataInformers := metadatainformer.NewSharedInformerFactory(metadataClient, 0)
+	onListError := func(error) bool { return false }
+	sharedInformers := informers.NewSharedInformerFactoryWithOptions(clientSet, 0, informers.WithOnListError(onListError))
+	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, 0, metadatainformer.WithOnListError(onListError))
 	alwaysStarted := make(chan struct{})
 	close(alwaysStarted)
 	gc, err := garbagecollector.NewGarbageCollector(
@@ -253,7 +254,6 @@ func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, work
 		garbagecollector.DefaultIgnoredResources(),
 		informerfactory.NewInformerFactory(sharedInformers, metadataInformers),
 		alwaysStarted,
-		false,
 	)
 	if err != nil {
 		t.Fatalf("failed to create garbage collector: %v", err)
