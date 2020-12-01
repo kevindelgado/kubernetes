@@ -242,8 +242,9 @@ func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, work
 	if err != nil {
 		t.Fatalf("failed to create dynamicClient: %v", err)
 	}
+	onListError := func(error) bool { return true }
 	sharedInformers := informers.NewSharedInformerFactory(clientSet, 0)
-	metadataInformers := metadatainformer.NewSharedInformerFactory(metadataClient, 0)
+	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, 0, metadatainformer.WithOnListError(onListError))
 	alwaysStarted := make(chan struct{})
 	close(alwaysStarted)
 	gc, err := garbagecollector.NewGarbageCollector(

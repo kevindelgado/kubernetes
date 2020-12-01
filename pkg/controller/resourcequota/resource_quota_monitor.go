@@ -23,7 +23,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/clock"
@@ -268,7 +268,7 @@ func (qm *QuotaMonitor) StartMonitors() {
 	for _, monitor := range monitors {
 		if monitor.stopCh == nil {
 			monitor.stopCh = make(chan struct{})
-			qm.informerFactory.Start(qm.stopCh)
+			qm.informerFactory.StartWithStopOptions(qm.stopCh)
 			go monitor.Run()
 			started++
 		}
