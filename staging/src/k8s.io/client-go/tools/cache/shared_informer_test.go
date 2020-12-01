@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/clock"
@@ -356,4 +356,27 @@ func TestSharedInformerErrorHandling(t *testing.T) {
 		t.Errorf("Timeout waiting for error handler call")
 	}
 	close(stop)
+}
+
+func TestSharedInformerStopOptions(t *testing.T) {
+	source := fcache.NewFakeControllerSource()
+	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
+	source.ListError = fmt.Errorf("Access Denied")
+
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+
+	go informer.RunWithStopOptions(StopOptions{
+		OnListError: func(err error) bool {
+			return true
+		},
+	})
+
+	select {
+	case <-informer.stopHandle.Done():
+		if !strings.Contains(informer.stopHandle.Err().Error(), "Access Denied") {
+			t.Errorf("Expected 'Access Denied' error. Actual: %v", informer.stopHandle.Err())
+		}
+	case <-time.After(time.Second):
+		t.Errorf("Timeout waiting for error handler call")
+	}
 }

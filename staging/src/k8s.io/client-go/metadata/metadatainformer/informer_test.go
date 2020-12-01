@@ -156,6 +156,40 @@ func TestMetadataSharedInformerFactory(t *testing.T) {
 	}
 }
 
+func TestStoppableMetadataSharedInformerFactory(t *testing.T) {
+	timeout := time.Duration(3 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	onListErrorFunc := func(error) bool {
+		return true
+	}
+	fakeClient := fake.NewSimpleMetadataClient(runtime.NewScheme(), []runtime.Object{}...)
+	target := NewSharedInformerFactoryWithOptions(fakeClient, 0, WithOnListError(onListErrorFunc))
+
+	gvr := schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"}
+	informerListerForGvr := target.ForResource(gvr)
+	target.StartWithStopOptions(ctx.Done())
+
+	go func() {
+		stopCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		informerListerForGvr.Informer().StopHandle().MergeChan(stopCtx.Done())
+	}()
+
+	// sleep to ensure informer gets cancelled.
+	time.Sleep(10 * time.Millisecond)
+	select {
+	case <-informerListerForGvr.Informer().StopHandle().Done():
+		err := informerListerForGvr.Informer().StopHandle().Err()
+		if err != nil {
+			t.Errorf("unexpected error %v", err)
+		}
+		return
+	case <-ctx.Done():
+		t.Errorf("informer has not stopped itself, waited %v", timeout)
+	}
+}
+
 func newPartialObjectMetadata(apiVersion, kind, namespace, name string) *metav1.PartialObjectMetadata {
 	return &metav1.PartialObjectMetadata{
 		TypeMeta: metav1.TypeMeta{
