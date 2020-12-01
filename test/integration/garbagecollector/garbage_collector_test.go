@@ -1215,6 +1215,8 @@ func TestCRDDeletionCascading(t *testing.T) {
 	definition, resourceClient := createRandomCustomResourceDefinition(t, apiExtensionClient, dynamicClient, ns.Name)
 	testCRDDeletion(t, ctx, ns, definition, resourceClient)
 
+	t.Logf("sleeping")
+	//time.Sleep(8 * time.Second)
 	t.Logf("Second pass CRD cascading deletion")
 	accessor := meta.NewAccessor()
 	accessor.SetResourceVersion(definition, "")
@@ -1246,26 +1248,34 @@ func testCRDDeletion(t *testing.T, ctx *testContext, ns *v1.Namespace, definitio
 	}
 	t.Logf("created dependent %q", dependent.GetName())
 
+	t.Logf("sleeping for %v + 5s", ctx.syncPeriod)
 	time.Sleep(ctx.syncPeriod + 5*time.Second)
 
 	// Delete the definition, which should cascade to the owner and ultimately its dependents.
+	t.Logf("starting crd uninstall")
 	if err := apiextensionstestserver.DeleteCustomResourceDefinition(definition, apiExtensionClient); err != nil {
 		t.Fatalf("failed to delete %q: %v", definition.Name, err)
 	}
+	t.Logf("crd uninstalled success")
 
 	// Ensure the owner is deleted.
-	if err := wait.Poll(1*time.Second, 60*time.Second, func() (bool, error) {
+	t.Logf("starting owner deletion")
+	if err := wait.Poll(1*time.Second, 15*time.Second, func() (bool, error) {
 		_, err := resourceClient.Get(context.TODO(), owner.GetName(), metav1.GetOptions{})
 		return apierrors.IsNotFound(err), nil
 	}); err != nil {
 		t.Fatalf("failed waiting for owner %q to be deleted", owner.GetName())
 	}
+	t.Logf("owner deleted success")
 
 	// Ensure the dependent is deleted.
-	if err := wait.Poll(1*time.Second, 60*time.Second, func() (bool, error) {
+	t.Logf("starting dependent deletion")
+	if err := wait.Poll(1*time.Second, 15*time.Second, func() (bool, error) {
 		_, err := configMapClient.Get(context.TODO(), dependent.GetName(), metav1.GetOptions{})
 		return apierrors.IsNotFound(err), nil
 	}); err != nil {
 		t.Fatalf("failed waiting for dependent %q (owned by %q) to be deleted", dependent.GetName(), owner.GetName())
 	}
+
+	t.Logf("dependent deleted success")
 }

@@ -174,20 +174,22 @@ type resettableRESTMapper interface {
 // the mapper's underlying discovery client will be unnecessarily reset during
 // the course of detecting new resources.
 func (gc *GarbageCollector) Sync(discoveryClient discovery.ServerResourcesInterface, period time.Duration, stopCh <-chan struct{}) {
+	klog.Infof("starting sync")
 	oldResources := make(map[schema.GroupVersionResource]struct{})
 	wait.Until(func() {
+		klog.Infof("starting sync iteration")
 		// Get the current resource list from discovery.
 		newResources := GetDeletableResources(discoveryClient)
 
 		// This can occur if there is an internal error in GetDeletableResources.
 		if len(newResources) == 0 {
-			klog.V(2).Infof("no resources reported by discovery, skipping garbage collector sync")
+			klog.Infof("no resources reported by discovery, skipping garbage collector sync")
 			return
 		}
 
 		// Decide whether discovery has reported a change.
 		if reflect.DeepEqual(oldResources, newResources) {
-			klog.V(5).Infof("no resource updates from discovery, skipping garbage collector sync")
+			klog.Infof("no resource updates from discovery, skipping garbage collector sync")
 			return
 		}
 
@@ -244,6 +246,7 @@ func (gc *GarbageCollector) Sync(discoveryClient discovery.ServerResourcesInterf
 			}
 
 			// success, break out of the loop
+			klog.V(4).Infof("sync done")
 			return true, nil
 		}, stopCh)
 
@@ -251,7 +254,7 @@ func (gc *GarbageCollector) Sync(discoveryClient discovery.ServerResourcesInterf
 		// have succeeded to ensure we'll retry on subsequent syncs if an error
 		// occurred.
 		oldResources = newResources
-		klog.V(2).Infof("synced garbage collector")
+		klog.Infof("synced garbage collector DONE")
 	}, period, stopCh)
 }
 

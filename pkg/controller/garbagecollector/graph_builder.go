@@ -84,6 +84,7 @@ type GraphBuilder struct {
 	monitorLock sync.RWMutex
 	// informersStarted is closed after after all of the controllers have been initialized and are running.
 	// After that it is safe to start them here, before that it is not.
+	// TODO: not sure if we need this anymore now that controllers don't get started independently?
 	informersStarted <-chan struct{}
 
 	// stopCh drives shutdown. When a receive from it unblocks, monitors will shut down.
@@ -214,13 +215,16 @@ func (gb *GraphBuilder) syncMonitors(resources map[schema.GroupVersionResource]s
 	}
 	gb.monitors = current
 
+	// TODO: even though this wasn't doing anything previously
+	// there's still the issue of what do we do about the monitors that should
+	// be stopped (because they are in toRemove) but haven't errored?
 	//for _, monitor := range toRemove {
 	//	if monitor.stopCh != nil {
 	//		close(monitor.stopCh)
 	//	}
 	//}
 
-	klog.V(4).Infof("synced monitors; added %d, kept %d, removed %d", added, kept, len(toRemove))
+	klog.Infof("synced monitors; added %d, kept %d, removed %d", added, kept, len(toRemove))
 	// NewAggregate returns nil if errs is 0-length
 	return utilerrors.NewAggregate(errs)
 }
@@ -613,14 +617,14 @@ func (gb *GraphBuilder) processGraphChanges() bool {
 			for _, dep := range potentiallyInvalidDependents {
 				if len(observedIdentity.Namespace) > 0 && dep.identity.Namespace != observedIdentity.Namespace {
 					// Namespace mismatch, this is definitely wrong
-					klog.V(2).Infof("node %s references an owner %s but does not match namespaces", dep.identity, observedIdentity)
+					klog.Infof("node %s references an owner %s but does not match namespaces", dep.identity, observedIdentity)
 					gb.reportInvalidNamespaceOwnerRef(dep, observedIdentity.UID)
 				}
 				gb.attemptToDelete.Add(dep)
 			}
 
 			// make a copy (so we don't modify the existing node in place), store the observed identity, and replace the virtual node
-			klog.V(2).Infof("replacing virtual node %s with observed node %s", existingNode.identity, observedIdentity)
+			klog.Infof("replacing virtual node %s with observed node %s", existingNode.identity, observedIdentity)
 			existingNode = existingNode.clone()
 			existingNode.identity = observedIdentity
 			gb.uidToNode.Write(existingNode)
@@ -662,7 +666,7 @@ func (gb *GraphBuilder) processGraphChanges() bool {
 		gb.processTransitions(event.oldObj, accessor, existingNode)
 	case event.eventType == deleteEvent:
 		if !found {
-			klog.V(5).Infof("%v doesn't exist in the graph, this shouldn't happen", accessor.GetUID())
+			klog.Infof("%v doesn't exist in the graph, this shouldn't happen", accessor.GetUID())
 			return true
 		}
 

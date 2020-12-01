@@ -17,6 +17,7 @@
 set -o errexit
 set -o nounset
 set -o pipefail
+set -x
 
 KUBE_ROOT=$(dirname "${BASH_SOURCE[0]}")/../..
 source "${KUBE_ROOT}/hack/lib/init.sh"
@@ -243,18 +244,25 @@ runTests() {
 
   verifyPathsToPackagesUnderTest "$@"
 
+  test_out=
   # If we're not collecting coverage, run all requested tests with one 'go test'
   # command, which is much faster.
-  if [[ ! ${KUBE_COVER} =~ ^[yY]$ ]]; then
-    kube::log::status "Running tests without code coverage"
-    go test "${goflags[@]:+${goflags[@]}}" \
-     "${KUBE_TIMEOUT}" "${@}" \
-     "${testargs[@]:+${testargs[@]}}" \
-     | tee ${junit_filename_prefix:+"${junit_filename_prefix}.stdout"} \
-     | grep --binary-files=text "${go_test_grep_pattern}" && rc=$? || rc=$?
-    produceJUnitXMLReport "${junit_filename_prefix}"
-    return ${rc}
-  fi
+#  if [[ ! ${KUBE_COVER} =~ ^[yY]$ ]]; then
+#    kube::log::status "Running tests without code coverage"
+#    go test -c "${goflags[@]:+${goflags[@]}}" \
+#     "${KUBE_TIMEOUT}" "${@}" \
+#     "${testargs[@]:+${testargs[@]}}" -o ${test_out}\
+#     && dlv exec ${test_out}
+#     | tee ${junit_filename_prefix:+"${junit_filename_prefix}.stdout"} \
+#     | grep --binary-files=text "${go_test_grep_pattern}" && rc=$? || rc=$?
+#    produceJUnitXMLReport "${junit_filename_prefix}"
+#    return ${rc}
+#  fi
+
+  #dlv test "${@}" -- --alsologtostderr=true --test.run=TestCRDDeletionCascading --test.short=true --vmodule=garbagecollector*=6,graph_builder*=6
+  go test "${@}" "${testargs[@]:+${testargs[@]}}"
+
+  return
 
   # Create coverage report directories.
   if [[ -z "${KUBE_COVER_REPORT_DIR}" ]]; then
