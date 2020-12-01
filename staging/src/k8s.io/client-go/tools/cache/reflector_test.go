@@ -105,6 +105,38 @@ func TestRunUntil(t *testing.T) {
 	}
 }
 
+func TestRunWithStopOptions(t *testing.T) {
+	store := NewStore(MetaNamespaceKeyFunc)
+	r := NewReflector(&testLW{}, &v1.Pod{}, store, 0)
+	listErr := errors.New("list error")
+	runErr := fmt.Errorf("failed to list %v: %v", r.expectedTypeName, listErr)
+	_ = watch.NewFake()
+	r.listerWatcher = &testLW{
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			panic("unreachable")
+		},
+		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			return nil, listErr
+		},
+	}
+
+	go r.RunWithStopOptions(StopOptions{
+		OnListError: func(err error) bool {
+			return true
+		},
+	})
+	select {
+	case <-r.stopHandle.Done():
+		if r.stopHandle.Err().Error() != runErr.Error() {
+			t.Errorf("expected %v, got %v", runErr.Error(), r.stopHandle.Err().Error())
+		}
+		break
+	case <-time.After(5 * time.Second):
+		t.Errorf("the cancellation is at least %s late", wait.ForeverTestTimeout.String())
+		break
+	}
+}
+
 func TestReflectorResyncChan(t *testing.T) {
 	s := NewStore(MetaNamespaceKeyFunc)
 	g := NewReflector(&testLW{}, &v1.Pod{}, s, time.Millisecond)
