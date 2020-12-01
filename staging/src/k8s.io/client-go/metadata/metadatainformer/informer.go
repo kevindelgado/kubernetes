@@ -31,23 +31,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// NewSharedInformerFactory constructs a new instance of metadataSharedInformerFactory for all namespaces.
-func NewSharedInformerFactory(client metadata.Interface, defaultResync time.Duration) SharedInformerFactory {
-	return NewFilteredSharedInformerFactory(client, defaultResync, metav1.NamespaceAll, nil)
-}
-
-// NewFilteredSharedInformerFactory constructs a new instance of metadataSharedInformerFactory.
-// Listers obtained via this factory will be subject to the same filters as specified here.
-func NewFilteredSharedInformerFactory(client metadata.Interface, defaultResync time.Duration, namespace string, tweakListOptions TweakListOptionsFunc) SharedInformerFactory {
-	return &metadataSharedInformerFactory{
-		client:           client,
-		defaultResync:    defaultResync,
-		namespace:        namespace,
-		informers:        map[schema.GroupVersionResource]informers.GenericInformer{},
-		startedInformers: make(map[schema.GroupVersionResource]bool),
-		tweakListOptions: tweakListOptions,
-	}
-}
+// SharedInformerOption defines the functional option type for SharedInformerFactory.
+type SharedInformerOption func(*metadataSharedInformerFactory) *metadataSharedInformerFactory
 
 type metadataSharedInformerFactory struct {
 	client        metadata.Interface
@@ -60,9 +45,66 @@ type metadataSharedInformerFactory struct {
 	// This allows Start() to be called multiple times safely.
 	startedInformers map[schema.GroupVersionResource]bool
 	tweakListOptions TweakListOptionsFunc
+	onListError      cache.OnListErrorFunc
 }
 
 var _ SharedInformerFactory = &metadataSharedInformerFactory{}
+
+// WithOnListError sets the onListErrFunc that is added to the stop options
+// when calling StartWithStopOptions.
+// This method results in every informer in this factory getting the same stop options.
+func WithOnListError(onListError cache.OnListErrorFunc) SharedInformerOption {
+	return func(factory *metadataSharedInformerFactory) *metadataSharedInformerFactory {
+		factory.onListError = onListError
+		return factory
+	}
+}
+
+// WithTweakListOptions sets a custom filter on all listers of the configured SharedInformerFactory.
+func WithTweakListOptions(tweakListOptions TweakListOptionsFunc) SharedInformerOption {
+	return func(factory *metadataSharedInformerFactory) *metadataSharedInformerFactory {
+		factory.tweakListOptions = tweakListOptions
+		return factory
+	}
+}
+
+// WithNamespace limits the SharedInformerFactory to the specified namespace.
+func WithNamespace(namespace string) SharedInformerOption {
+	return func(factory *metadataSharedInformerFactory) *metadataSharedInformerFactory {
+		factory.namespace = namespace
+		return factory
+	}
+}
+
+// NewSharedInformerFactory constructs a new instance of metadataSharedInformerFactory for all namespaces.
+func NewSharedInformerFactory(client metadata.Interface, defaultResync time.Duration) SharedInformerFactory {
+	return NewSharedInformerFactoryWithOptions(client, defaultResync)
+}
+
+// NewFilteredSharedInformerFactory constructs a new instance of metadataSharedInformerFactory.
+// Listers obtained via this factory will be subject to the same filters as specified here.
+// Deprecated: Please use NewSharedInformerFactoryWithOptions instead
+func NewFilteredSharedInformerFactory(client metadata.Interface, defaultResync time.Duration, namespace string, tweakListOptions TweakListOptionsFunc) SharedInformerFactory {
+	return NewSharedInformerFactoryWithOptions(client, defaultResync, WithNamespace(namespace), WithTweakListOptions(tweakListOptions))
+}
+
+// NewSharedInformerFactoryWithOptions constructs a new instance of a SharedInformerFactory with additional options.
+func NewSharedInformerFactoryWithOptions(client metadata.Interface, defaultResync time.Duration, options ...SharedInformerOption) SharedInformerFactory {
+	factory := &metadataSharedInformerFactory{
+		client:           client,
+		defaultResync:    defaultResync,
+		namespace:        metav1.NamespaceAll,
+		informers:        map[schema.GroupVersionResource]informers.GenericInformer{},
+		startedInformers: make(map[schema.GroupVersionResource]bool),
+	}
+
+	// Apply all options
+	for _, opt := range options {
+		factory = opt(factory)
+	}
+
+	return factory
+}
 
 func (f *metadataSharedInformerFactory) ForResource(gvr schema.GroupVersionResource) informers.GenericInformer {
 	f.lock.Lock()
@@ -91,6 +133,46 @@ func (f *metadataSharedInformerFactory) Start(stopCh <-chan struct{}) {
 			f.startedInformers[informerType] = true
 		}
 	}
+}
+
+func (f *metadataSharedInformerFactory) informerStopped(informerType schema.GroupVersionResource) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	delete(f.startedInformers, informerType)
+	delete(f.informers, informerType)
+}
+
+// StartWithStopOptions initializes all requested informers with the stop options provided, defaulting to
+// the old stop options (only stopping via closure of stopCh).
+// It makes sure remove an informer from the list of informers and started informers when the informer is stopped
+// to prevent a race where InformerFor gives the user back a stopped informer that will never be started again.
+func (f *metadataSharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	onListError := func(error) bool {
+		return false
+	}
+	if f.onListError != nil {
+		onListError = f.onListError
+	}
+	stopOptions := cache.StopOptions{
+		ExternalStop: stopCh,
+		OnListError:  onListError,
+	}
+	for informerType, informer := range f.informers {
+		informerType := informerType
+		informer := informer
+		if !f.startedInformers[informerType] {
+			go func() {
+				defer f.informerStopped(informerType)
+				informer.Informer().RunWithStopOptions(stopOptions)
+				<-informer.Informer().StopHandle().Done()
+			}()
+			f.startedInformers[informerType] = true
+		}
+	}
+
 }
 
 // WaitForCacheSync waits for all started informers' cache were synced.
