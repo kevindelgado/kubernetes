@@ -242,7 +242,7 @@ func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, work
 	if err != nil {
 		t.Fatalf("failed to create dynamicClient: %v", err)
 	}
-	onListError := func(error) bool { return false }
+	onListError := func(error) bool { return true }
 	sharedInformers := informers.NewSharedInformerFactoryWithOptions(clientSet, 0, informers.WithOnListError(onListError))
 	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, 0, metadatainformer.WithOnListError(onListError))
 	alwaysStarted := make(chan struct{})
@@ -266,12 +266,6 @@ func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, work
 	}
 	syncPeriod := 5 * time.Second
 	startGC := func(workers int) {
-		go wait.Until(func() {
-			// Resetting the REST mapper will also invalidate the underlying discovery
-			// client. This is a leaky abstraction and assumes behavior about the REST
-			// mapper, but we'll deal with it for now.
-			restMapper.Reset()
-		}, syncPeriod, stopCh)
 		go gc.Run(workers, stopCh)
 		go gc.Sync(clientSet.Discovery(), syncPeriod, stopCh)
 	}
