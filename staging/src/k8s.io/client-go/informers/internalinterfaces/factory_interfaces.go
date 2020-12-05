@@ -35,6 +35,7 @@ type SharedInformerFactory interface {
 	StartWithStopOptions(stopCh <-chan struct{})
 	Start(stopCh <-chan struct{})
 	InformerFor(obj runtime.Object, newFunc NewInformerFunc) cache.SharedIndexInformer
+	DoneChannelForObj(obj runtime.Object) (cache.DoneChannel, bool)
 }
 
 // TweakListOptionsFunc is a function that transforms a v1.ListOptions.

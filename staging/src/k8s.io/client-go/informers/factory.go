@@ -65,6 +65,8 @@ type sharedInformerFactory struct {
 	// startedInformers is used for tracking which informers have been started.
 	// This allows Start() to be called multiple times safely.
 	startedInformers map[reflect.Type]bool
+	// TODO: change startedInformers to map type to Done
+	stoppableInformers map[reflect.Type]cache.DoneChannel
 }
 
 // WithOnListErr sets the onListErrFunc that is added to the stop options
@@ -119,12 +121,13 @@ func NewFilteredSharedInformerFactory(client kubernetes.Interface, defaultResync
 // NewSharedInformerFactoryWithOptions constructs a new instance of a SharedInformerFactory with additional options.
 func NewSharedInformerFactoryWithOptions(client kubernetes.Interface, defaultResync time.Duration, options ...SharedInformerOption) SharedInformerFactory {
 	factory := &sharedInformerFactory{
-		client:           client,
-		namespace:        v1.NamespaceAll,
-		defaultResync:    defaultResync,
-		informers:        make(map[reflect.Type]cache.SharedIndexInformer),
-		startedInformers: make(map[reflect.Type]bool),
-		customResync:     make(map[reflect.Type]time.Duration),
+		client:             client,
+		namespace:          v1.NamespaceAll,
+		defaultResync:      defaultResync,
+		informers:          make(map[reflect.Type]cache.SharedIndexInformer),
+		startedInformers:   make(map[reflect.Type]bool),
+		stoppableInformers: make(map[reflect.Type]cache.DoneChannel),
+		customResync:       make(map[reflect.Type]time.Duration),
 	}
 
 	// Apply all options
@@ -186,6 +189,7 @@ func (f *sharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
 				<-informer.Done().Done()
 			}()
 			f.startedInformers[informerType] = true
+			f.stoppableInformers[informerType] = informer.Done().Done()
 		}
 	}
 }
@@ -235,11 +239,22 @@ func (f *sharedInformerFactory) InformerFor(obj runtime.Object, newFunc internal
 	return informer
 }
 
+func (f *sharedInformerFactory) DoneChannelForObj(obj runtime.Object) (cache.DoneChannel, bool) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	informerType := reflect.TypeOf(obj)
+	doneCh, ok := f.stoppableInformers[informerType]
+	return doneCh, ok
+
+}
+
 // SharedInformerFactory provides shared informers for resources in all known
 // API group versions.
 type SharedInformerFactory interface {
 	internalinterfaces.SharedInformerFactory
 	ForResource(resource schema.GroupVersionResource) (GenericInformer, error)
+	DoneChannelFor(resource schema.GroupVersionResource) (cache.DoneChannel, bool)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
 
 	Admissionregistration() admissionregistration.Interface

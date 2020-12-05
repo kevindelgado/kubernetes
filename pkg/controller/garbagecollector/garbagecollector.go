@@ -166,6 +166,14 @@ type resettableRESTMapper interface {
 	Reset()
 }
 
+func (gc *GarbageCollector) recentlyRemoved(set resourceSet) resourceSet {
+	for resource, _ := range gc.dependencyGraphBuilder.recentlyRemoved {
+		delete(set, resource)
+		delete(gc.dependencyGraphBuilder.recentlyRemoved, resource)
+	}
+	return set
+}
+
 // Sync periodically resyncs the garbage collector when new resources are
 // observed from discovery. When new resources are detected, Sync will stop all
 // GC workers, reset gc.restMapper, and resync the monitors.
@@ -178,6 +186,9 @@ func (gc *GarbageCollector) Sync(discoveryClient discovery.ServerResourcesInterf
 	wait.Until(func() {
 		// Get the current resource list from discovery.
 		newResources := GetDeletableResources(discoveryClient)
+
+		// TODO(kdelga): filter resources stopped since the last sync
+		newResources = gc.recentlyRemoved(newResources)
 
 		// This can occur if there is an internal error in GetDeletableResources.
 		if len(newResources) == 0 {
@@ -688,6 +699,8 @@ func (gc *GarbageCollector) GraphHasUID(u types.UID) bool {
 	_, ok := gc.dependencyGraphBuilder.uidToNode.Read(u)
 	return ok
 }
+
+type resourceSet map[schema.GroupVersionResource]struct{}
 
 // GetDeletableResources returns all resources from discoveryClient that the
 // garbage collector should recognize and work with. More specifically, all

@@ -80,8 +80,9 @@ type GraphBuilder struct {
 
 	// each monitor list/watches a resource, the results are funneled to the
 	// dependencyGraphBuilder
-	monitors    monitors
-	monitorLock sync.RWMutex
+	monitors        monitors
+	recentlyRemoved resourceSet
+	monitorLock     sync.RWMutex
 	// informersStarted is closed after after all of the controllers have been initialized and are running.
 	// After that it is safe to start them here, before that it is not.
 	informersStarted <-chan struct{}
@@ -121,6 +122,12 @@ type GraphBuilder struct {
 type monitor struct {
 	controller cache.Controller
 	store      cache.Store
+	doneCh     cache.DoneChannel
+}
+
+func (m *monitor) waitForDone() {
+	<-m.doneCh
+	// push to recently stopped set
 }
 
 type monitors map[schema.GroupVersionResource]*monitor
@@ -235,7 +242,19 @@ func (gb *GraphBuilder) startMonitors() {
 	// we're waiting until after the informer start that happens once all the controllers are initialized.  This ensures
 	// that they don't get unexpected events on their work queues.
 	<-gb.informersStarted
+
 	gb.sharedInformers.StartWithStopOptions(gb.stopCh)
+	// TODO(kdelga): Some sort of monitor looping to confirms when the informer is shutdown
+	monitors := gb.monitors
+	for gvr, monitor := range monitors {
+		if monitor.doneCh == nil {
+			// TODO(kdelga): DoneChannelFor should take gvr right?
+			// Should we only be doing this when ok?
+			if _, ok := gb.sharedInformers.DoneChannelFor(gvr); ok {
+				go monitor.waitForDone()
+			}
+		}
+	}
 	klog.V(4).Infof("all %d monitors have been started", len(gb.monitors))
 }
 

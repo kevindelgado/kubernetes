@@ -86,6 +86,11 @@ func (f *genericInformer) Lister() cache.GenericLister {
 	return cache.NewGenericLister(f.Informer().GetIndexer(), f.resource)
 }
 
+// TODO(kdelga): I think this is wrong
+func (f *sharedInformerFactory) DoneChannelFor(resource schema.GroupVersionResource) (cache.DoneChannel, bool) {
+	return nil, false
+}
+
 // ForResource gives generic access to a shared informer of the matching type
 // TODO extend this to unknown resources with a client pool
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
