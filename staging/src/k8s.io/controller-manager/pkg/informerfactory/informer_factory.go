@@ -21,6 +21,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/metadata/metadatainformer"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 )
 
 // InformerFactory creates informers for each group version resource.
@@ -39,8 +40,10 @@ type informerFactory struct {
 func (i *informerFactory) DoneChannelFor(resource schema.GroupVersionResource) (cache.DoneChannel, bool) {
 	doneChannel, ok := i.typedInformerFactory.DoneChannelFor(resource)
 	if !ok {
+		klog.Warningf("dcf using meta %v", resource)
 		return i.metadataInformerFactory.DoneChannelFor(resource)
 	}
+	klog.Warningf("dcf using typed %v", resource)
 	return doneChannel, ok
 }
 

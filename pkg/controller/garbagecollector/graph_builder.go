@@ -80,9 +80,10 @@ type GraphBuilder struct {
 
 	// each monitor list/watches a resource, the results are funneled to the
 	// dependencyGraphBuilder
-	monitors        monitors
-	recentlyRemoved resourceSet
-	monitorLock     sync.RWMutex
+	monitors            monitors
+	monitorLock         sync.RWMutex
+	recentlyRemoved     resourceSet
+	recentlyRemovedLock sync.RWMutex
 	// informersStarted is closed after after all of the controllers have been initialized and are running.
 	// After that it is safe to start them here, before that it is not.
 	informersStarted <-chan struct{}
@@ -125,10 +126,14 @@ type monitor struct {
 	doneCh     cache.DoneChannel
 }
 
-func (m *monitor) waitForDone() {
-	<-m.doneCh
-	// push to recently stopped set
-}
+//func (gb *GraphBuilder) waitForDone(gvr schema.GroupVersionResource, m *monitor) {
+//	klog.Warningf("starting wait for done %v", gvr)
+//	<-m.doneCh
+//	klog.Warningf("wait done %v", gvr)
+//	// push to recently stopped set
+//	var void struct{}
+//	gb.recentlyRemoved[gvr] = void
+//}
 
 type monitors map[schema.GroupVersionResource]*monitor
 
@@ -250,9 +255,25 @@ func (gb *GraphBuilder) startMonitors() {
 		if monitor.doneCh == nil {
 			// TODO(kdelga): DoneChannelFor should take gvr right?
 			// Should we only be doing this when ok?
-			if _, ok := gb.sharedInformers.DoneChannelFor(gvr); ok {
-				go monitor.waitForDone()
+			if doneCh, ok := gb.sharedInformers.DoneChannelFor(gvr); ok {
+				//go gb.waitForDone(gvr, monitor)
+				klog.Warningf("got doneCh for gvr %v", gvr)
+				go func() {
+					klog.Warningf("starting wait for done %v", gvr)
+					<-doneCh
+					klog.Warningf("wait done %v", gvr)
+					// push to recently stopped set
+					var void struct{}
+					gb.recentlyRemovedLock.Lock()
+					defer gb.recentlyRemovedLock.Unlock()
+					gb.recentlyRemoved[gvr] = void
+
+				}()
+			} else {
+				klog.Warningf("no doneCh for gvr %v", gvr)
 			}
+		} else {
+			klog.Warningf("no monitor for gvr %v", gvr)
 		}
 	}
 	klog.V(4).Infof("all %d monitors have been started", len(gb.monitors))

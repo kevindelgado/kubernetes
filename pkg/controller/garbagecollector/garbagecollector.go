@@ -117,6 +117,7 @@ func NewGarbageCollector(
 		absentOwnerCache: absentOwnerCache,
 		sharedInformers:  sharedInformers,
 		ignoredResources: ignoredResources,
+		recentlyRemoved:  make(resourceSet),
 	}
 
 	return gc, nil
@@ -167,10 +168,12 @@ type resettableRESTMapper interface {
 }
 
 func (gc *GarbageCollector) recentlyRemoved(set resourceSet) resourceSet {
+	klog.Warningf("gc recentlyRemoved set length: %d", len(gc.dependencyGraphBuilder.recentlyRemoved))
 	for resource, _ := range gc.dependencyGraphBuilder.recentlyRemoved {
 		delete(set, resource)
 		delete(gc.dependencyGraphBuilder.recentlyRemoved, resource)
 	}
+	klog.Warningf("end gc recentlyRemoved set length: %d", len(gc.dependencyGraphBuilder.recentlyRemoved))
 	return set
 }
 

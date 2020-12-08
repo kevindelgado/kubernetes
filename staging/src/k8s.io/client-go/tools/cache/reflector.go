@@ -247,13 +247,13 @@ func (r *Reflector) RunWithStopOptions(stopOptions StopOptions) {
 			if onListErr != nil {
 				if stopOptions.OnListError(err) {
 					r.stopHandle.WithError(err)
-					klog.V(2).Infof("Closing with list error %v", r.stopHandle.Err())
+					klog.Warningf("Closing with list error %v", r.stopHandle.Err())
 					r.stopHandle.Close()
 				}
 			}
 		}
 	}, r.backoffManager, true, r.stopHandle.Done())
-	klog.V(2).Infof("Stopping reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
+	klog.Warningf("Stopping reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
 }
 
 // Run calls RunWithStopOptions and only exits when stopCh is closed
