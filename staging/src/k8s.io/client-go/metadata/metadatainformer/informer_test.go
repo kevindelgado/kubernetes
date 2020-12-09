@@ -156,6 +156,7 @@ func TestMetadataSharedInformerFactory(t *testing.T) {
 	}
 }
 
+// TODO(kdelga): add testing for DoneChannelFor
 func TestStoppableMetadataSharedInformerFactory(t *testing.T) {
 	timeout := time.Duration(3 * time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -173,14 +174,14 @@ func TestStoppableMetadataSharedInformerFactory(t *testing.T) {
 	go func() {
 		stopCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		informerListerForGvr.Informer().Done().MergeChan(stopCtx.Done())
+		informerListerForGvr.Informer().StopHandle().MergeChan(stopCtx.Done())
 	}()
 
 	// sleep to ensure informer gets cancelled.
 	time.Sleep(10 * time.Millisecond)
 	select {
-	case <-informerListerForGvr.Informer().Done().Done():
-		err := informerListerForGvr.Informer().Done().Err()
+	case <-informerListerForGvr.Informer().StopHandle().Done():
+		err := informerListerForGvr.Informer().StopHandle().Err()
 		if err != nil {
 			t.Errorf("unexpected error %v", err)
 		}

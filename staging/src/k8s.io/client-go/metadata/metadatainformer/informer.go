@@ -43,10 +43,9 @@ type metadataSharedInformerFactory struct {
 	informers map[schema.GroupVersionResource]informers.GenericInformer
 	// startedInformers is used for tracking which informers have been started.
 	// This allows Start() to be called multiple times safely.
-	startedInformers   map[schema.GroupVersionResource]bool
-	stoppableInformers map[schema.GroupVersionResource]cache.DoneChannel
-	tweakListOptions   TweakListOptionsFunc
-	onListError        cache.OnListErrorFunc
+	startedInformers map[schema.GroupVersionResource]cache.DoneChannel
+	tweakListOptions TweakListOptionsFunc
+	onListError      cache.OnListErrorFunc
 }
 
 var _ SharedInformerFactory = &metadataSharedInformerFactory{}
@@ -92,12 +91,11 @@ func NewFilteredSharedInformerFactory(client metadata.Interface, defaultResync t
 // NewSharedInformerFactoryWithOptions constructs a new instance of a SharedInformerFactory with additional options.
 func NewSharedInformerFactoryWithOptions(client metadata.Interface, defaultResync time.Duration, options ...SharedInformerOption) SharedInformerFactory {
 	factory := &metadataSharedInformerFactory{
-		client:             client,
-		defaultResync:      defaultResync,
-		namespace:          metav1.NamespaceAll,
-		informers:          map[schema.GroupVersionResource]informers.GenericInformer{},
-		startedInformers:   make(map[schema.GroupVersionResource]bool),
-		stoppableInformers: make(map[schema.GroupVersionResource]cache.DoneChannel),
+		client:           client,
+		defaultResync:    defaultResync,
+		namespace:        metav1.NamespaceAll,
+		informers:        map[schema.GroupVersionResource]informers.GenericInformer{},
+		startedInformers: make(map[schema.GroupVersionResource]cache.DoneChannel),
 	}
 
 	// Apply all options
@@ -112,7 +110,7 @@ func (f *metadataSharedInformerFactory) DoneChannelFor(gvr schema.GroupVersionRe
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
-	doneCh, ok := f.stoppableInformers[gvr]
+	doneCh, ok := f.startedInformers[gvr]
 	return doneCh, ok
 }
 
@@ -138,9 +136,9 @@ func (f *metadataSharedInformerFactory) Start(stopCh <-chan struct{}) {
 	defer f.lock.Unlock()
 
 	for informerType, informer := range f.informers {
-		if !f.startedInformers[informerType] {
+		if _, ok := f.startedInformers[informerType]; !ok {
 			go informer.Informer().Run(stopCh)
-			f.startedInformers[informerType] = true
+			f.startedInformers[informerType] = nil
 		}
 	}
 }
@@ -170,14 +168,13 @@ func (f *metadataSharedInformerFactory) StartWithStopOptions(stopCh <-chan struc
 	for informerType, informer := range f.informers {
 		informerType := informerType
 		informer := informer
-		if !f.startedInformers[informerType] {
+		if _, ok := f.startedInformers[informerType]; !ok {
 			go func() {
 				defer f.informerStopped(informerType)
 				informer.Informer().RunWithStopOptions(stopOptions)
-				<-informer.Informer().Done().Done()
+				<-informer.Informer().StopHandle().Done()
 			}()
-			f.startedInformers[informerType] = true
-			f.stoppableInformers[informerType] = informer.Informer().Done().Done()
+			f.startedInformers[informerType] = informer.Informer().StopHandle().Done()
 		}
 	}
 
@@ -191,7 +188,7 @@ func (f *metadataSharedInformerFactory) WaitForCacheSync(stopCh <-chan struct{})
 
 		informers := map[schema.GroupVersionResource]cache.SharedIndexInformer{}
 		for informerType, informer := range f.informers {
-			if f.startedInformers[informerType] {
+			if _, ok := f.startedInformers[informerType]; ok {
 				informers[informerType] = informer.Informer()
 			}
 		}

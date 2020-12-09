@@ -62,11 +62,10 @@ type sharedInformerFactory struct {
 	onListError      cache.OnListErrorFunc
 
 	informers map[reflect.Type]cache.SharedIndexInformer
-	// startedInformers is used for tracking which informers have been started.
+	// startedInformers is used for tracking which informers have been started
+	// along with the DoneChannel that indicates when an informer is stopped.
 	// This allows Start() to be called multiple times safely.
-	startedInformers map[reflect.Type]bool
-	// TODO: change startedInformers to map type to Done
-	stoppableInformers map[reflect.Type]cache.DoneChannel
+	startedInformers map[reflect.Type]cache.DoneChannel
 }
 
 // WithOnListErr sets the onListErrFunc that is added to the stop options
@@ -121,13 +120,12 @@ func NewFilteredSharedInformerFactory(client kubernetes.Interface, defaultResync
 // NewSharedInformerFactoryWithOptions constructs a new instance of a SharedInformerFactory with additional options.
 func NewSharedInformerFactoryWithOptions(client kubernetes.Interface, defaultResync time.Duration, options ...SharedInformerOption) SharedInformerFactory {
 	factory := &sharedInformerFactory{
-		client:             client,
-		namespace:          v1.NamespaceAll,
-		defaultResync:      defaultResync,
-		informers:          make(map[reflect.Type]cache.SharedIndexInformer),
-		startedInformers:   make(map[reflect.Type]bool),
-		stoppableInformers: make(map[reflect.Type]cache.DoneChannel),
-		customResync:       make(map[reflect.Type]time.Duration),
+		client:           client,
+		namespace:        v1.NamespaceAll,
+		defaultResync:    defaultResync,
+		informers:        make(map[reflect.Type]cache.SharedIndexInformer),
+		startedInformers: make(map[reflect.Type]cache.DoneChannel),
+		customResync:     make(map[reflect.Type]time.Duration),
 	}
 
 	// Apply all options
@@ -139,14 +137,19 @@ func NewSharedInformerFactoryWithOptions(client kubernetes.Interface, defaultRes
 }
 
 // Start initializes all requested informers.
+// This is the legacy Start method. Use StartWithStopOptions for
+// greater control over how the informer shuts down.
 func (f *sharedInformerFactory) Start(stopCh <-chan struct{}) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
 	for informerType, informer := range f.informers {
-		if !f.startedInformers[informerType] {
+		if _, ok := f.startedInformers[informerType]; ok {
 			go informer.Run(stopCh)
-			f.startedInformers[informerType] = true
+			// informers that use the legacy Start method
+			// as opposed to StartWithStopOptions won't have
+			// a done channel.
+			f.startedInformers[informerType] = nil
 		}
 	}
 }
@@ -182,14 +185,17 @@ func (f *sharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
 	for informerType, informer := range f.informers {
 		informerType := informerType
 		informer := informer
-		if !f.startedInformers[informerType] {
+		// TODO(kdelga): what should we do if you call StartWithStopOptions()
+		// after calling Start().
+		// As it stands, it will just ignore the stop options, but I'm not sure if that is
+		// the desired behavior.
+		if _, ok := f.startedInformers[informerType]; !ok {
 			go func() {
 				defer f.informerStopped(informerType)
 				informer.RunWithStopOptions(stopOptions)
-				<-informer.Done().Done()
+				<-informer.StopHandle().Done()
 			}()
-			f.startedInformers[informerType] = true
-			f.stoppableInformers[informerType] = informer.Done().Done()
+			f.startedInformers[informerType] = informer.StopHandle().Done()
 		}
 	}
 }
@@ -202,7 +208,7 @@ func (f *sharedInformerFactory) WaitForCacheSync(stopCh <-chan struct{}) map[ref
 
 		informers := map[reflect.Type]cache.SharedIndexInformer{}
 		for informerType, informer := range f.informers {
-			if f.startedInformers[informerType] {
+			if _, ok := f.startedInformers[informerType]; ok {
 				informers[informerType] = informer
 			}
 		}
@@ -244,7 +250,7 @@ func (f *sharedInformerFactory) DoneChannelForObj(obj runtime.Object) (cache.Don
 	defer f.lock.Unlock()
 
 	informerType := reflect.TypeOf(obj)
-	doneCh, ok := f.stoppableInformers[informerType]
+	doneCh, ok := f.startedInformers[informerType]
 	return doneCh, ok
 
 }

@@ -166,7 +166,7 @@ func (f *sharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
 			go func() {
 				defer f.informerStopped(informerType)
 				informer.RunWithStopOptions(stopOptions)
-				<-informer.Done().Done()
+				<-informer.StopHandle().Done()
 			}()
 			f.startedInformers[informerType] = true
 		}

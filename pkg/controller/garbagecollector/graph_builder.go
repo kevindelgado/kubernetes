@@ -80,10 +80,13 @@ type GraphBuilder struct {
 
 	// each monitor list/watches a resource, the results are funneled to the
 	// dependencyGraphBuilder
-	monitors            monitors
-	monitorLock         sync.RWMutex
-	recentlyRemoved     resourceSet
-	recentlyRemovedLock sync.RWMutex
+	monitors    monitors
+	monitorLock sync.RWMutex
+	// stoppedResources is the set resources that have been stopped
+	// in between garbage collector syncs.
+	// They get removed from the set following the next gc Sync.
+	stoppedResources     resourceSet
+	stoppedResourcesLock sync.RWMutex
 	// informersStarted is closed after after all of the controllers have been initialized and are running.
 	// After that it is safe to start them here, before that it is not.
 	informersStarted <-chan struct{}
@@ -123,19 +126,10 @@ type GraphBuilder struct {
 type monitor struct {
 	controller cache.Controller
 	store      cache.Store
-	doneCh     cache.DoneChannel
 }
 
-//func (gb *GraphBuilder) waitForDone(gvr schema.GroupVersionResource, m *monitor) {
-//	klog.Warningf("starting wait for done %v", gvr)
-//	<-m.doneCh
-//	klog.Warningf("wait done %v", gvr)
-//	// push to recently stopped set
-//	var void struct{}
-//	gb.recentlyRemoved[gvr] = void
-//}
-
 type monitors map[schema.GroupVersionResource]*monitor
+type resourceSet map[schema.GroupVersionResource]struct{}
 
 func (gb *GraphBuilder) controllerFor(resource schema.GroupVersionResource, kind schema.GroupVersionKind) (cache.Controller, cache.Store, error) {
 	handlers := cache.ResourceEventHandlerFuncs{
@@ -249,31 +243,17 @@ func (gb *GraphBuilder) startMonitors() {
 	<-gb.informersStarted
 
 	gb.sharedInformers.StartWithStopOptions(gb.stopCh)
-	// TODO(kdelga): Some sort of monitor looping to confirms when the informer is shutdown
 	monitors := gb.monitors
-	for gvr, monitor := range monitors {
-		if monitor.doneCh == nil {
-			// TODO(kdelga): DoneChannelFor should take gvr right?
-			// Should we only be doing this when ok?
-			if doneCh, ok := gb.sharedInformers.DoneChannelFor(gvr); ok {
-				//go gb.waitForDone(gvr, monitor)
-				klog.Warningf("got doneCh for gvr %v", gvr)
-				go func() {
-					klog.Warningf("starting wait for done %v", gvr)
-					<-doneCh
-					klog.Warningf("wait done %v", gvr)
-					// push to recently stopped set
-					var void struct{}
-					gb.recentlyRemovedLock.Lock()
-					defer gb.recentlyRemovedLock.Unlock()
-					gb.recentlyRemoved[gvr] = void
-
-				}()
-			} else {
-				klog.Warningf("no doneCh for gvr %v", gvr)
-			}
-		} else {
-			klog.Warningf("no monitor for gvr %v", gvr)
+	for gvr := range monitors {
+		// TODO(kdelga): Should we only be doing this when ok?
+		if doneCh, ok := gb.sharedInformers.DoneChannelFor(gvr); ok {
+			go func() {
+				<-doneCh
+				// push to set of recently stopped resources.
+				gb.stoppedResourcesLock.Lock()
+				defer gb.stoppedResourcesLock.Unlock()
+				gb.stoppedResources[gvr] = struct{}{}
+			}()
 		}
 	}
 	klog.V(4).Infof("all %d monitors have been started", len(gb.monitors))

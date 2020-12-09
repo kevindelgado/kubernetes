@@ -86,9 +86,9 @@ func (f *genericInformer) Lister() cache.GenericLister {
 	return cache.NewGenericLister(f.Informer().GetIndexer(), f.resource)
 }
 
-// TODO(kdelga): I think this is wrong
+// DoneChannelFor returns the done channel indicating the when the resource's informer is stopped.
 func (f *sharedInformerFactory) DoneChannelFor(resource schema.GroupVersionResource) (cache.DoneChannel, bool) {
-	return nil, false
+	return f.DoneChannelFor(resource)
 }
 
 // ForResource gives generic access to a shared informer of the matching type
