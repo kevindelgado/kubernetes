@@ -168,13 +168,9 @@ type SharedInformer interface {
 	// RunWithStopOptions starts and runs the shared informer, returning after it stops.
 	// The informer will be stopped when a stopOptions condition is met.
 	RunWithStopOptions(stopOptions StopOptions)
-	// Done returns a StopHandle that the caller can use to know when and why
+	// StopHandle is used by the caller to know when and why
 	// a shared informer has stopped.
-	// TODO: I don't love that the name of this is Done().
-	// 1. It creates stutter calling Done().Done()
-	// 2. It seems weird to call something called Done() in order to get a handle you can then call Close() on
-	// Open to any suggestions on better naming.
-	Done() StopHandle
+	StopHandle() StopHandle
 	// HasSynced returns true if the shared informer's store has been
 	// informed by at least one full LIST of the authoritative state
 	// of the informer's object collection.  This is unrelated to "resync".
@@ -451,8 +447,7 @@ type sharedIndexInformer struct {
 	// Called whenever the ListAndWatch drops the connection with an error.
 	watchErrorHandler WatchErrorHandler
 
-	// stopHandle contains the internal stop and stopper channels and gets returned
-	// when the caller calls Done() on the informer.
+	// stopHandle contains the internal stop and stopper channels on the informer.
 	stopHandle StopHandle
 }
 
@@ -471,7 +466,7 @@ func (v *dummyController) Run(stopCh <-chan struct{}) {
 func (v *dummyController) RunWithStopOptions(stopOptions StopOptions) {
 }
 
-func (v *dummyController) Done() StopHandle {
+func (v *dummyController) StopHandle() StopHandle {
 	return v.informer.stopHandle
 }
 
@@ -508,7 +503,7 @@ func (s *sharedIndexInformer) SetWatchErrorHandler(handler WatchErrorHandler) er
 	return nil
 }
 
-func (s *sharedIndexInformer) Done() StopHandle {
+func (s *sharedIndexInformer) StopHandle() StopHandle {
 	return s.stopHandle
 }
 
