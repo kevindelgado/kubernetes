@@ -248,6 +248,7 @@ func TestDynamicSharedInformerFactory(t *testing.T) {
 	}
 }
 
+// TODO(kdelga): add testing for DoneChannelFor
 func TestStoppableDynamicSharedInformerFactory(t *testing.T) {
 	timeout := time.Duration(3 * time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)

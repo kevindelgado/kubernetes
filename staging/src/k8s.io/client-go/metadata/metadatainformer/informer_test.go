@@ -156,6 +156,7 @@ func TestMetadataSharedInformerFactory(t *testing.T) {
 	}
 }
 
+// TODO(kdelga): add testing for DoneChannelFor
 func TestStoppableMetadataSharedInformerFactory(t *testing.T) {
 	timeout := time.Duration(3 * time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
