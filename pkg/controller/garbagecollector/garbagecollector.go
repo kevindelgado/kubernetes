@@ -117,6 +117,7 @@ func NewGarbageCollector(
 		absentOwnerCache: absentOwnerCache,
 		sharedInformers:  sharedInformers,
 		ignoredResources: ignoredResources,
+		stoppedResources: make(resourceSet),
 	}
 
 	return gc, nil
@@ -178,6 +179,11 @@ func (gc *GarbageCollector) Sync(discoveryClient discovery.ServerResourcesInterf
 	wait.Until(func() {
 		// Get the current resource list from discovery.
 		newResources := GetDeletableResources(discoveryClient)
+
+		// Filter resources that have been uninstalled and reinstalled stopped since the last sync.
+		// The following sync will recognize them as new resources and they will be restarted.
+		// If we do not filter them out, the informer that was previously stopped will not get restarted.
+		gc.dependencyGraphBuilder.filterStoppedResources(newResources)
 
 		// This can occur if there is an internal error in GetDeletableResources.
 		if len(newResources) == 0 {
