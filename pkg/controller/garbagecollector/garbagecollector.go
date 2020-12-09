@@ -117,7 +117,7 @@ func NewGarbageCollector(
 		absentOwnerCache: absentOwnerCache,
 		sharedInformers:  sharedInformers,
 		ignoredResources: ignoredResources,
-		recentlyRemoved:  make(resourceSet),
+		stoppedResources: make(resourceSet),
 	}
 
 	return gc, nil
@@ -167,13 +167,19 @@ type resettableRESTMapper interface {
 	Reset()
 }
 
-func (gc *GarbageCollector) recentlyRemoved(set resourceSet) resourceSet {
-	klog.Warningf("gc recentlyRemoved set length: %d", len(gc.dependencyGraphBuilder.recentlyRemoved))
-	for resource, _ := range gc.dependencyGraphBuilder.recentlyRemoved {
+// filterResources filters out the resources that have been removed
+// and reinstalled from the cluster in between garbage collector syncs.
+func (gc *GarbageCollector) filterResources(set resourceSet) resourceSet {
+	gc.dependencyGraphBuilder.stoppedResourcesLock.Lock()
+	defer gc.dependencyGraphBuilder.stoppedResourcesLock.Unlock()
+	for resource := range gc.dependencyGraphBuilder.stoppedResources {
+		// filter resource from the resource set used by Sync
+		// so that it's deletion is recognized on the first Sync cycle.
 		delete(set, resource)
-		delete(gc.dependencyGraphBuilder.recentlyRemoved, resource)
+		// filter the resource from gb's recentlyRemoved set
+		// so that it gets re-installed on the next sync cycle.
+		delete(gc.dependencyGraphBuilder.stoppedResources, resource)
 	}
-	klog.Warningf("end gc recentlyRemoved set length: %d", len(gc.dependencyGraphBuilder.recentlyRemoved))
 	return set
 }
 
@@ -190,8 +196,10 @@ func (gc *GarbageCollector) Sync(discoveryClient discovery.ServerResourcesInterf
 		// Get the current resource list from discovery.
 		newResources := GetDeletableResources(discoveryClient)
 
-		// TODO(kdelga): filter resources stopped since the last sync
-		newResources = gc.recentlyRemoved(newResources)
+		// Filter resources that have been uninstalled and reinstalled stopped since the last sync.
+		// The following sync will recognize them as new resources and they will be restarted.
+		// If we do not filter them out, the informer that was previously stopped will not get restarted.
+		newResources = gc.filterResources(newResources)
 
 		// This can occur if there is an internal error in GetDeletableResources.
 		if len(newResources) == 0 {
@@ -702,8 +710,6 @@ func (gc *GarbageCollector) GraphHasUID(u types.UID) bool {
 	_, ok := gc.dependencyGraphBuilder.uidToNode.Read(u)
 	return ok
 }
-
-type resourceSet map[schema.GroupVersionResource]struct{}
 
 // GetDeletableResources returns all resources from discoveryClient that the
 // garbage collector should recognize and work with. More specifically, all
