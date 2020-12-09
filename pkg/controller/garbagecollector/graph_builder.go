@@ -82,6 +82,11 @@ type GraphBuilder struct {
 	// dependencyGraphBuilder
 	monitors    monitors
 	monitorLock sync.RWMutex
+	// stoppedResources is the set resources that have been stopped
+	// in between garbage collector syncs.
+	// They get removed from the set following the next gc Sync.
+	stoppedResources     resourceSet
+	stoppedResourcesLock sync.RWMutex
 	// informersStarted is closed after after all of the controllers have been initialized and are running.
 	// After that it is safe to start them here, before that it is not.
 	informersStarted <-chan struct{}
@@ -120,6 +125,7 @@ type monitor struct {
 }
 
 type monitors map[schema.GroupVersionResource]*monitor
+type resourceSet map[schema.GroupVersionResource]struct{}
 
 func (gb *GraphBuilder) controllerFor(resource schema.GroupVersionResource, kind schema.GroupVersionKind) (cache.Controller, cache.Store, error) {
 	handlers := cache.ResourceEventHandlerFuncs{
@@ -165,6 +171,21 @@ func (gb *GraphBuilder) controllerFor(resource schema.GroupVersionResource, kind
 	// need to clone because it's from a shared cache
 	shared.Informer().AddEventHandlerWithResyncPeriod(handlers, ResourceResyncTime)
 	return shared.Informer().GetController(), shared.Informer().GetStore(), nil
+}
+
+// filterStoppedResources filters out the resources that have been removed
+// and reinstalled from the cluster in between garbage collector syncs.
+func (gb *GraphBuilder) filterStoppedResources(set resourceSet) {
+	gb.stoppedResourcesLock.Lock()
+	defer gb.stoppedResourcesLock.Unlock()
+	for resource := range gb.stoppedResources {
+		// filter resource from the resource set used by Sync
+		// so that it's deletion is recognized on the first Sync cycle.
+		delete(set, resource)
+		// filter the resource from gb's recentlyRemoved set
+		// so that it gets re-installed on the next sync cycle.
+		delete(gb.stoppedResources, resource)
+	}
 }
 
 // syncMonitors rebuilds the monitor set according to the supplied resources,
@@ -231,7 +252,21 @@ func (gb *GraphBuilder) startMonitors() {
 	// we're waiting until after the informer start that happens once all the controllers are initialized.  This ensures
 	// that they don't get unexpected events on their work queues.
 	<-gb.informersStarted
+
 	gb.sharedInformers.StartWithStopOptions(gb.stopCh)
+	monitors := gb.monitors
+	for gvr := range monitors {
+		// TODO(kdelga): Should we only be doing this when ok?
+		if doneCh, ok := gb.sharedInformers.DoneChannelFor(gvr); ok {
+			go func() {
+				<-doneCh
+				// push to set of recently stopped resources.
+				gb.stoppedResourcesLock.Lock()
+				defer gb.stoppedResourcesLock.Unlock()
+				gb.stoppedResources[gvr] = struct{}{}
+			}()
+		}
+	}
 	klog.V(4).Infof("all %d monitors have been started", len(gb.monitors))
 }
 
