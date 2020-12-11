@@ -19,6 +19,7 @@ package metadatainformer
 import (
 	"context"
 	"flag"
+	"fmt"
 	"testing"
 	"time"
 
@@ -179,8 +180,18 @@ func TestStoppableMetadataSharedInformerFactory(t *testing.T) {
 
 	// sleep to ensure informer gets cancelled.
 	time.Sleep(10 * time.Millisecond)
+	doneCh2 := informerListerForGvr.Informer().StopHandle().Done()
+	doneCh, ok := target.DoneChannelFor(gvr)
+	if !ok {
+		t.Errorf("couldn't get done channel for resource")
+	}
+	fmt.Printf("doneCh = %+v\n", doneCh)
+	fmt.Printf("informerListerForGvr.Informer().StopHandle().Done() = %+v\n", informerListerForGvr.Informer().StopHandle().Done())
+	fmt.Printf("doneCh2 = %+v\n", doneCh2)
 	select {
-	case <-informerListerForGvr.Informer().StopHandle().Done():
+	//case <-informerListerForGvr.Informer().StopHandle().Done():
+	case <-doneCh:
+		//case <-doneCh2:
 		err := informerListerForGvr.Informer().StopHandle().Err()
 		if err != nil {
 			t.Errorf("unexpected error %v", err)
