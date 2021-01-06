@@ -184,7 +184,7 @@ func NewReflectorWithStopHandle(lw ListerWatcher, expectedType interface{}, stor
 // NewNamedReflectorWithStopHandle same as NewNamedReflector, but with a specified stopHandle.
 func NewNamedReflectorWithStopHandle(name string, lw ListerWatcher, expectedType interface{}, store Store, resyncPeriod time.Duration, stopHandle StopHandle) *Reflector {
 	if stopHandle == nil {
-		stopHandle = NewStopHandle(make(chan struct{}))
+		stopHandle = NewStopHandle()
 	}
 	realClock := &clock.RealClock{}
 	r := &Reflector{

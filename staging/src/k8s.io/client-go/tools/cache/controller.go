@@ -414,7 +414,7 @@ func newInformer(
 		ObjectType:       objType,
 		FullResyncPeriod: resyncPeriod,
 		RetryOnError:     false,
-		StopHandle:       NewStopHandle(make(chan struct{})),
+		StopHandle:       NewStopHandle(),
 
 		Process: func(obj interface{}) error {
 			// from oldest to newest

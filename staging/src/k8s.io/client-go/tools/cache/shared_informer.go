@@ -226,25 +226,45 @@ type StopHandle interface {
 type stopHandle struct {
 	// stopWrite is used to close the stopRead channel when the informer's
 	// underlying controller/reflector stop running.
-	stopWrite chan<- struct{}
+	stopWrite  chan<- struct{}
+	stopWrites []chan<- struct{}
 	// stopRead is closed in order to stop the informer.
-	stopRead <-chan struct{}
+	stopRead  <-chan struct{}
+	stopReads []<-chan struct{}
 	// err gets populated by the cause of the informer stopping
 	// or is nil because the stopRead channel was closed.
-	err error
+	err            error
+	stopHandleLock sync.Mutex
 }
 
 // NewStopHandle creates a stop handle from a bidirectonal stop channel.
-func NewStopHandle(stop chan struct{}) StopHandle {
-	return &stopHandle{
+func NewStopHandle() StopHandle {
+	stop := make(chan struct{})
+	handle := &stopHandle{
 		stopWrite: stop,
-		stopRead:  stop,
 	}
+	handle.addStopRead(stop)
+	return handle
+}
+
+func (h *stopHandle) addStopRead(ch <-chan struct{}) {
+	go func() {
+		<-ch
+		h.stopHandleLock.Lock()
+		defer h.stopHandleLock.Unlock()
+		for _, ch := range h.stopWrites {
+			close(ch)
+		}
+	}()
 }
 
 // Done returns a channel that's closed when the informer is stopped.
 func (h *stopHandle) Done() DoneChannel {
-	return h.stopRead
+	ch := make(chan struct{})
+	h.stopHandleLock.Lock()
+	defer h.stopHandleLock.Unlock()
+	h.stopWrites = append(h.stopWrites, ch)
+	return ch
 }
 
 // Err returns the error (if applicable) that caused the shared informer to be stopped.
@@ -252,25 +272,33 @@ func (h *stopHandle) Done() DoneChannel {
 // Err can only be called after h.Done() has closed otherwise it will return
 // nil.
 func (h *stopHandle) Err() error {
+	h.stopHandleLock.Lock()
+	defer h.stopHandleLock.Unlock()
 	return h.err
 }
 
 // WithError provides a way to set the error on the stop handle.
 // TODO: is it ok to just directly write the err or should we be chaining errors together some way?
 func (h *stopHandle) WithError(err error) {
+	h.stopHandleLock.Lock()
+	defer h.stopHandleLock.Unlock()
 	h.err = err
 }
 
 // Close allows for stopping the ifnormer (and closing the done channel).
 func (h *stopHandle) Close() {
+	h.stopHandleLock.Lock()
+	defer h.stopHandleLock.Unlock()
 	close(h.stopWrite)
 }
 
 // MergeChan takes a chan and merges with the done channel such that the done channel closes
 // when either the channel being merged closes or an explicit Close() is called on the stop handle.
 func (h *stopHandle) MergeChan(ch <-chan struct{}) context.CancelFunc {
+	h.stopHandleLock.Lock()
+	defer h.stopHandleLock.Unlock()
 	newRead, cancel := mergeChan(h.stopRead, ch)
-	h.stopRead = newRead
+	h.stopReads = append(h.stopReads, newRead)
 	return cancel
 }
 
@@ -346,7 +374,7 @@ func NewSharedIndexInformer(lw ListerWatcher, exampleObject runtime.Object, defa
 		defaultEventHandlerResyncPeriod: defaultEventHandlerResyncPeriod,
 		cacheMutationDetector:           NewCacheMutationDetector(fmt.Sprintf("%T", exampleObject)),
 		clock:                           realClock,
-		stopHandle:                      NewStopHandle(make(chan struct{})),
+		stopHandle:                      NewStopHandle(),
 	}
 	return sharedIndexInformer
 }
