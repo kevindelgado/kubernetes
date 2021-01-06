@@ -163,30 +163,29 @@ func TestStoppableMetadataSharedInformerFactory(t *testing.T) {
 	onListErrorFunc := func(error) bool {
 		return true
 	}
-	fakeClient := fake.NewSimpleMetadataClient(runtime.NewScheme(), []runtime.Object{}...)
+	testObject := newPartialObjectMetadata("extensions/v1beta1", "Deployment", "ns-foo", "name-foo")
+	scheme := runtime.NewScheme()
+	metav1.AddMetaToScheme(scheme)
+	fakeClient := fake.NewSimpleMetadataClient(scheme, []runtime.Object{testObject}...)
 	target := NewSharedInformerFactoryWithOptions(fakeClient, 0, WithOnListError(onListErrorFunc))
 
 	gvr := schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"}
-	informerListerForGvr := target.ForResource(gvr)
-	target.StartWithStopOptions(ctx.Done())
+	// retrieve the informer for the resource forces the factory to create the informer.
+	_ = target.ForResource(gvr)
+	infCtx, infCancel := context.WithCancel(ctx)
+	target.StartWithStopOptions(infCtx.Done())
+	doneChannel, ok := target.DoneChannelFor(gvr)
+	if !ok {
+		t.Errorf("Unable to retrieve done channel for gvr")
+	}
+	go infCancel()
 
-	go func() {
-		stopCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		informerListerForGvr.Informer().StopHandle().MergeChan(stopCtx.Done())
-	}()
-
-	// sleep to ensure informer gets cancelled.
-	time.Sleep(10 * time.Millisecond)
 	select {
-	case <-informerListerForGvr.Informer().StopHandle().Done():
-		err := informerListerForGvr.Informer().StopHandle().Err()
-		if err != nil {
-			t.Errorf("unexpected error %v", err)
-		}
-		return
+	case <-doneChannel:
+		break
 	case <-ctx.Done():
 		t.Errorf("informer has not stopped itself, waited %v", timeout)
+		break
 	}
 }
 
