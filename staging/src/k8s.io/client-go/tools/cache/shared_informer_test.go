@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -358,25 +359,29 @@ func TestSharedInformerErrorHandling(t *testing.T) {
 	close(stop)
 }
 
-func TestSharedInformerStopOptions(t *testing.T) {
+func TestSharedInformerRunWithStopOptions(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
 	source.ListError = fmt.Errorf("Access Denied")
 
 	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
 
-	go informer.RunWithStopOptions(StopOptions{
-		OnListError: func(err error) bool {
-			return true
-		},
-	})
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		// confirm the informer stops running when it hits a list error
+		defer cancel()
+		informer.RunWithStopOptions(ctx, StopOptions{
+			OnListError: func(err error) bool {
+				return true
+			},
+		})
+	}()
 
 	select {
-	case <-informer.stopHandle.Done():
-		if !strings.Contains(informer.stopHandle.Err().Error(), "Access Denied") {
-			t.Errorf("Expected 'Access Denied' error. Actual: %v", informer.stopHandle.Err())
-		}
+	case <-ctx.Done():
+		break
 	case <-time.After(time.Second):
 		t.Errorf("Timeout waiting for error handler call")
+		break
 	}
 }

@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -55,7 +56,6 @@ func Example() {
 		ObjectType:       &v1.Pod{},
 		FullResyncPeriod: time.Millisecond * 100,
 		RetryOnError:     false,
-		StopHandle:       NewStopHandle(make(chan struct{})),
 
 		// Let's implement a simple controller that just deletes
 		// everything that comes in.
@@ -447,5 +447,35 @@ func TestPanicPropagated(t *testing.T) {
 		}
 	case <-time.After(wait.ForeverTestTimeout):
 		t.Errorf("timeout: the panic failed to propagate from the controller run method!")
+	}
+}
+
+func TestControllerRunWithStopOptions(t *testing.T) {
+	source := fcache.NewFakeControllerSource()
+	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
+	source.ListError = fmt.Errorf("Access Denied")
+
+	_, controller := NewInformer(
+		source,
+		&v1.Pod{},
+		time.Millisecond*100,
+		ResourceEventHandlerFuncs{},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		// confirm the controller stops running when it hits a list error
+		defer cancel()
+		controller.RunWithStopOptions(ctx, StopOptions{
+			OnListError: func(err error) bool {
+				return true
+			},
+		})
+	}()
+	select {
+	case <-ctx.Done():
+		break
+	case <-time.After(5 * time.Second):
+		t.Errorf("the cancellation is at least %s late", wait.ForeverTestTimeout.String())
+		break
 	}
 }

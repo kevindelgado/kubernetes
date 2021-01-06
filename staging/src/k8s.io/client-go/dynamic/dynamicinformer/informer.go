@@ -169,20 +169,24 @@ func (f *dynamicSharedInformerFactory) StartWithStopOptions(stopCh <-chan struct
 		onListError = f.onListError
 	}
 	stopOptions := cache.StopOptions{
-		ExternalStop: stopCh,
-		OnListError:  onListError,
+		OnListError: onListError,
 	}
 	for informerType, informer := range f.informers {
 		informerType := informerType
 		informer := informer
 		if !f.startedInformers[informerType] {
-			go func() {
+			infCtx, infCancel := context.WithCancel(context.TODO())
+			go func(cancel context.CancelFunc) {
+				defer cancel()
+				<-stopCh
+			}(infCancel)
+			go func(ctx context.Context, cancel context.CancelFunc) {
 				defer f.informerStopped(informerType)
-				informer.Informer().RunWithStopOptions(stopOptions)
-				<-informer.Informer().StopHandle().Done()
-			}()
+				defer cancel()
+				informer.Informer().RunWithStopOptions(ctx, stopOptions)
+			}(infCtx, infCancel)
 			f.startedInformers[informerType] = true
-			f.stoppableInformers[informerType] = informer.Informer().StopHandle().Done()
+			f.stoppableInformers[informerType] = infCtx.Done()
 		}
 	}
 

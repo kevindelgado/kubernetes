@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -75,10 +76,6 @@ type Config struct {
 
 	// WatchListPageSize is the requested chunk size of initial and relist watch lists.
 	WatchListPageSize int64
-
-	// StopHandle contains channels for stopping and observing the stoppage of the reflector
-	// as well as err indicating why the reflector was stopped.
-	StopHandle
 }
 
 // ShouldResyncFunc is a type of function that indicates if a reflector should perform a
@@ -106,7 +103,7 @@ type Controller interface {
 	// on that Queue.  The other is to repeatedly Pop from the Queue
 	// and process with the Config's ProcessFunc.  Both of these
 	// continue until the stopOptions recognize a stop condition.
-	RunWithStopOptions(stopOptions StopOptions)
+	RunWithStopOptions(ctx context.Context, stopOptions StopOptions)
 
 	// Run is the legacy interface for running a controller that once called,
 	// can only be stopped by closing the stop channel.
@@ -129,25 +126,18 @@ func New(c *Config) Controller {
 	return ctlr
 }
 
-// RunWithStopOptions begins processing items, and will continue until stopOptions recognizes a stop condition.
-// RunWithStopOptions blocks; call via go.
-func (c *controller) RunWithStopOptions(stopOptions StopOptions) {
-	defer utilruntime.HandleCrash()
-	if stopOptions.ExternalStop != nil {
-		cancel := c.config.StopHandle.MergeChan(stopOptions.ExternalStop)
-		defer cancel()
-		stopOptions.ExternalStop = nil
-	}
+// runSetup is a helper for the shared setup between
+// controller#Run and controller#RunWithStopOptions.
+func (c *controller) runSetup(stopCh <-chan struct{}) *Reflector {
 	go func() {
-		<-c.config.StopHandle.Done()
+		<-stopCh
 		c.config.Queue.Close()
 	}()
-	r := NewReflectorWithStopHandle(
+	r := NewReflector(
 		c.config.ListerWatcher,
 		c.config.ObjectType,
 		c.config.Queue,
 		c.config.FullResyncPeriod,
-		c.config.StopHandle,
 	)
 	r.ShouldResync = c.config.ShouldResync
 	r.WatchListPageSize = c.config.WatchListPageSize
@@ -159,25 +149,40 @@ func (c *controller) RunWithStopOptions(stopOptions StopOptions) {
 	c.reflectorMutex.Lock()
 	c.reflector = r
 	c.reflectorMutex.Unlock()
+	return r
+}
+
+// RunWithStopOptions begins processing items, and will continue until stopOptions recognizes a stop condition.
+// RunWithStopOptions blocks; call via go.
+func (c *controller) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
+	defer utilruntime.HandleCrash()
+	refCtx, refCancel := context.WithCancel(ctx)
+	r := c.runSetup(refCtx.Done())
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		r.RunWithStopOptions(stopOptions)
+		defer refCancel()
+		r.RunWithStopOptions(refCtx, stopOptions)
 	}()
 
-	// TODO: Does the process loop also need to be ran with stop options?
-	wait.Until(c.processLoop, time.Second, c.config.StopHandle.Done())
+	wait.Until(c.processLoop, time.Second, refCtx.Done())
 	wg.Wait()
 }
 
 // Run supports calling RunWithStopOptions with just a stop channel
 // that when closed, is the only stop condition that will stop the controller.
+// TODO(kdelga): factor this and RunWithStopOptions out.
 func (c *controller) Run(stopCh <-chan struct{}) {
-	cancel := c.config.StopHandle.MergeChan(stopCh)
-	defer cancel()
-	c.RunWithStopOptions(StopOptions{})
+	defer utilruntime.HandleCrash()
+	r := c.runSetup(stopCh)
+
+	var wg wait.Group
+	wg.StartWithChannel(stopCh, r.Run)
+
+	wait.Until(c.processLoop, time.Second, stopCh)
+	wg.Wait()
 }
 
 // Returns true once this controller has completed an initial resource listing
@@ -414,7 +419,6 @@ func newInformer(
 		ObjectType:       objType,
 		FullResyncPeriod: resyncPeriod,
 		RetryOnError:     false,
-		StopHandle:       NewStopHandle(make(chan struct{})),
 
 		Process: func(obj interface{}) error {
 			// from oldest to newest
