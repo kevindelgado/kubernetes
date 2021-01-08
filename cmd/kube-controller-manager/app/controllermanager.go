@@ -240,7 +240,7 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 		} else {
 			clientBuilder = rootClientBuilder
 		}
-		controllerContext, err := CreateControllerContext(c, rootClientBuilder, clientBuilder, ctx.Done())
+		controllerContext, err := CreateControllerContext(c, rootClientBuilder, clientBuilder, ctx)
 		if err != nil {
 			klog.Fatalf("error building controller context: %v", err)
 		}
@@ -335,7 +335,8 @@ type ControllerContext struct {
 	LoopMode ControllerLoopMode
 
 	// Stop is the stop channel
-	Stop <-chan struct{}
+	Stop    <-chan struct{}
+	Context context.Context
 
 	// InformersStarted is closed after all of the controllers have been initialized and are running.  After this point it is safe,
 	// for an individual controller to start the shared informers. Before it is closed, they should not.
@@ -466,7 +467,7 @@ func GetAvailableResources(clientBuilder clientbuilder.ControllerClientBuilder) 
 // CreateControllerContext creates a context struct containing references to resources needed by the
 // controllers such as the cloud provider and clientBuilder. rootClientBuilder is only used for
 // the shared-informers client and token controller.
-func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clientBuilder clientbuilder.ControllerClientBuilder, stop <-chan struct{}) (ControllerContext, error) {
+func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clientBuilder clientbuilder.ControllerClientBuilder, ctx context.Context) (ControllerContext, error) {
 	versionedClient := rootClientBuilder.ClientOrDie("shared-informers")
 
 	// always stop informers when the ListAndWatch errors out
@@ -487,7 +488,7 @@ func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clien
 	restMapper := restmapper.NewDeferredDiscoveryRESTMapper(cachedClient)
 	go wait.Until(func() {
 		restMapper.Reset()
-	}, 30*time.Second, stop)
+	}, 30*time.Second, ctx.Done())
 
 	availableResources, err := GetAvailableResources(rootClientBuilder)
 	if err != nil {
@@ -500,7 +501,7 @@ func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clien
 		return ControllerContext{}, err
 	}
 
-	ctx := ControllerContext{
+	return ControllerContext{
 		ClientBuilder:                   clientBuilder,
 		InformerFactory:                 sharedInformers,
 		ObjectOrMetadataInformerFactory: informerfactory.NewInformerFactory(sharedInformers, metadataInformers),
@@ -509,11 +510,11 @@ func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clien
 		AvailableResources:              availableResources,
 		Cloud:                           cloud,
 		LoopMode:                        loopMode,
-		Stop:                            stop,
+		Stop:                            ctx.Done(),
+		Context:                         ctx,
 		InformersStarted:                make(chan struct{}),
 		ResyncPeriod:                    ResyncPeriod(s),
-	}
-	return ctx, nil
+	}, nil
 }
 
 // StartControllers starts a set of controllers with a specified ControllerContext

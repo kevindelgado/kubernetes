@@ -472,7 +472,7 @@ func startResourceQuotaController(ctx ControllerContext) (http.Handler, bool, er
 	if err != nil {
 		return nil, false, err
 	}
-	go resourceQuotaController.Run(int(ctx.ComponentConfig.ResourceQuotaController.ConcurrentResourceQuotaSyncs), ctx.Stop)
+	go resourceQuotaController.Run(ctx.Context, int(ctx.ComponentConfig.ResourceQuotaController.ConcurrentResourceQuotaSyncs))
 
 	// Periodically the quota controller to detect new resource types
 	go resourceQuotaController.Sync(discoveryFunc, 30*time.Second, ctx.Stop)
@@ -566,7 +566,7 @@ func startGarbageCollectorController(ctx ControllerContext) (http.Handler, bool,
 
 	// Start the garbage collector.
 	workers := int(ctx.ComponentConfig.GarbageCollectorController.ConcurrentGCSyncs)
-	go garbageCollector.Run(workers, ctx.Stop)
+	go garbageCollector.Run(ctx.Context, workers)
 
 	// Periodically refresh the RESTMapper with new discovery information and sync
 	// the garbage collector.

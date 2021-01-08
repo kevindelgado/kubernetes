@@ -158,7 +158,7 @@ func (f *dynamicSharedInformerFactory) informerStopped(informerType schema.Group
 // the old stop options (only stopping via closure of stopCh).
 // It makes sure remove an informer from the list of informers and started informers when the informer is stopped
 // to prevent a race where InformerFor gives the user back a stopped informer that will never be started again.
-func (f *dynamicSharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
+func (f *dynamicSharedInformerFactory) StartWithStopOptions(ctx context.Context) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
@@ -169,20 +169,23 @@ func (f *dynamicSharedInformerFactory) StartWithStopOptions(stopCh <-chan struct
 		onListError = f.onListError
 	}
 	stopOptions := cache.StopOptions{
-		ExternalStop: stopCh,
-		OnListError:  onListError,
+		//ExternalStop: stopCh,
+		OnListError: onListError,
 	}
 	for informerType, informer := range f.informers {
 		informerType := informerType
 		informer := informer
+		infCtx, _ := context.WithCancel(ctx)
 		if !f.startedInformers[informerType] {
 			go func() {
 				defer f.informerStopped(informerType)
-				informer.Informer().RunWithStopOptions(stopOptions)
-				<-informer.Informer().StopHandle().Done()
+				informer.Informer().RunWithStopOptions(infCtx, stopOptions)
+				//<-informer.Informer().StopHandle().Done()
+				<-infCtx.Done()
 			}()
 			f.startedInformers[informerType] = true
-			f.stoppableInformers[informerType] = informer.Informer().StopHandle().Done()
+			//f.stoppableInformers[informerType] = informer.Informer().StopHandle().Done()
+			f.stoppableInformers[informerType] = infCtx.Done()
 		}
 	}
 

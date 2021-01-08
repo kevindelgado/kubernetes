@@ -116,9 +116,10 @@ func TestGarbageCollectorConstruction(t *testing.T) {
 	assert.Equal(t, 1, len(gc.dependencyGraphBuilder.monitors))
 
 	// Make sure the syncing mechanism also works after Run() has been called
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-	go gc.Run(1, stopCh)
+	//stopCh := make(chan struct{})
+	//defer close(stopCh)
+	ctx := context.Background()
+	go gc.Run(ctx, 1)
 
 	err = gc.resyncMonitors(twoResources)
 	if err != nil {
@@ -202,7 +203,9 @@ func testServerAndClientConfig(handler func(http.ResponseWriter, *http.Request))
 
 type garbageCollector struct {
 	*GarbageCollector
-	stop chan struct{}
+	//stop chan struct{}
+	stop   <-chan struct{}
+	cancel context.CancelFunc
 }
 
 func setupGC(t *testing.T, config *restclient.Config) garbageCollector {
@@ -219,9 +222,10 @@ func setupGC(t *testing.T, config *restclient.Config) garbageCollector {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stop := make(chan struct{})
-	go sharedInformers.StartWithStopOptions(stop)
-	return garbageCollector{gc, stop}
+	//stop := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	go sharedInformers.StartWithStopOptions(ctx)
+	return garbageCollector{gc, ctx.Done(), cancel}
 }
 
 func getPod(podName string, ownerReferences []metav1.OwnerReference) *v1.Pod {
@@ -273,7 +277,7 @@ func TestAttemptToDeleteItem(t *testing.T) {
 	defer srv.Close()
 
 	gc := setupGC(t, clientConfig)
-	defer close(gc.stop)
+	defer gc.cancel()
 
 	item := &node{
 		identity: objectReference{
@@ -439,7 +443,7 @@ func BenchmarkReferencesDiffs(t *testing.B) {
 // data race among in the dependents field.
 func TestDependentsRace(t *testing.T) {
 	gc := setupGC(t, &restclient.Config{})
-	defer close(gc.stop)
+	defer gc.cancel()
 
 	const updates = 100
 	owner := &node{dependents: make(map[*node]struct{})}
@@ -546,7 +550,7 @@ func TestAbsentOwnerCache(t *testing.T) {
 	srv, clientConfig := testServerAndClientConfig(testHandler.ServeHTTP)
 	defer srv.Close()
 	gc := setupGC(t, clientConfig)
-	defer close(gc.stop)
+	defer gc.cancel()
 	gc.absentOwnerCache = NewReferenceCache(2)
 	gc.attemptToDeleteItem(podToGCNode(rc1Pod1))
 	gc.attemptToDeleteItem(podToGCNode(rc2Pod1))
@@ -675,7 +679,7 @@ func TestOrphanDependentsFailure(t *testing.T) {
 	defer srv.Close()
 
 	gc := setupGC(t, clientConfig)
-	defer close(gc.stop)
+	defer gc.cancel()
 
 	dependents := []*node{
 		{
@@ -853,9 +857,10 @@ func TestGarbageCollectorSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-	go gc.Run(1, stopCh)
+	//stopCh := make(chan struct{})
+	//defer close(stopCh)
+	ctx := context.Background()
+	go gc.Run(ctx, 1)
 	// The pseudo-code of GarbageCollector.Sync():
 	// GarbageCollector.Sync(client, period, stopCh):
 	//    wait.Until() loops with `period` until the `stopCh` is closed :
@@ -870,7 +875,7 @@ func TestGarbageCollectorSync(t *testing.T) {
 	// The 1s sleep in the test allows GetDelableResources and
 	// gc.resyncMoitors to run ~5 times to ensure the changes to the
 	// fakeDiscoveryClient are picked up.
-	go gc.Sync(fakeDiscoveryClient, 200*time.Millisecond, stopCh)
+	go gc.Sync(fakeDiscoveryClient, 200*time.Millisecond, ctx.Done())
 
 	// Wait until the sync discovers the initial resources
 	time.Sleep(1 * time.Second)

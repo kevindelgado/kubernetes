@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -429,15 +430,18 @@ func TestSharedInformerStopOptions(t *testing.T) {
 
 	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
 
-	go informer.RunWithStopOptions(StopOptions{
+	ctx := context.Background()
+	go informer.RunWithStopOptions(ctx, StopOptions{
 		OnListError: func(err error) bool {
 			return true
 		},
 	})
 
+	// sleep so the lister has time to error out
+	time.Sleep(10 * time.Millisecond)
 	select {
 	case <-informer.stopHandle.Done():
-		if !strings.Contains(informer.stopHandle.Err().Error(), "Access Denied") {
+		if !strings.Contains(informer.stopHandle.Err().Error(), "context canceled") {
 			t.Errorf("Expected 'Access Denied' error. Actual: %v", informer.stopHandle.Err())
 		}
 	case <-time.After(time.Second):

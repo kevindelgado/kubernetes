@@ -85,8 +85,9 @@ func TestQuota(t *testing.T) {
 	ns2 := framework.CreateTestingNamespace("non-quotaed", s, t)
 	defer framework.DeleteTestingNamespace(ns2, s, t)
 
-	controllerCh := make(chan struct{})
-	defer close(controllerCh)
+	//controllerCh := make(chan struct{})
+	//defer close(controllerCh)
+	ctx := context.Background()
 
 	informers := informers.NewSharedInformerFactory(clientset, controller.NoResyncPeriodFunc())
 	rm := replicationcontroller.NewReplicationManager(
@@ -96,7 +97,7 @@ func TestQuota(t *testing.T) {
 		replicationcontroller.BurstReplicas,
 	)
 	rm.SetEventRecorder(&record.FakeRecorder{})
-	go rm.Run(3, controllerCh)
+	go rm.Run(3, ctx.Done())
 
 	discoveryFunc := clientset.Discovery().ServerPreferredNamespacedResources
 	listerFuncForResource := generic.ListerFuncForResourceFunc(informers.ForResource)
@@ -117,13 +118,13 @@ func TestQuota(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	go resourceQuotaController.Run(2, controllerCh)
+	go resourceQuotaController.Run(ctx, 2)
 
 	// Periodically the quota controller to detect new resource types
-	go resourceQuotaController.Sync(discoveryFunc, 30*time.Second, controllerCh)
+	go resourceQuotaController.Sync(discoveryFunc, 30*time.Second, ctx.Done())
 
-	internalInformers.Start(controllerCh)
-	informers.Start(controllerCh)
+	internalInformers.Start(ctx.Done())
+	informers.Start(ctx.Done())
 	close(informersStarted)
 
 	startTime := time.Now()
@@ -283,8 +284,9 @@ func TestQuotaLimitedResourceDenial(t *testing.T) {
 	ns := framework.CreateTestingNamespace("quota", s, t)
 	defer framework.DeleteTestingNamespace(ns, s, t)
 
-	controllerCh := make(chan struct{})
-	defer close(controllerCh)
+	//controllerCh := make(chan struct{})
+	//defer close(controllerCh)
+	ctx := context.Background()
 
 	informers := informers.NewSharedInformerFactory(clientset, controller.NoResyncPeriodFunc())
 	rm := replicationcontroller.NewReplicationManager(
@@ -294,7 +296,7 @@ func TestQuotaLimitedResourceDenial(t *testing.T) {
 		replicationcontroller.BurstReplicas,
 	)
 	rm.SetEventRecorder(&record.FakeRecorder{})
-	go rm.Run(3, controllerCh)
+	go rm.Run(3, ctx.Done())
 
 	discoveryFunc := clientset.Discovery().ServerPreferredNamespacedResources
 	listerFuncForResource := generic.ListerFuncForResourceFunc(informers.ForResource)
@@ -315,13 +317,13 @@ func TestQuotaLimitedResourceDenial(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	go resourceQuotaController.Run(2, controllerCh)
+	go resourceQuotaController.Run(ctx, 2)
 
 	// Periodically the quota controller to detect new resource types
-	go resourceQuotaController.Sync(discoveryFunc, 30*time.Second, controllerCh)
+	go resourceQuotaController.Sync(discoveryFunc, 30*time.Second, ctx.Done())
 
-	externalInformers.Start(controllerCh)
-	informers.Start(controllerCh)
+	externalInformers.Start(ctx.Done())
+	informers.Start(ctx.Done())
 	close(informersStarted)
 
 	// try to create a pod

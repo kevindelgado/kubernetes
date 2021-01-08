@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -109,7 +110,7 @@ func TestRunWithStopOptions(t *testing.T) {
 	store := NewStore(MetaNamespaceKeyFunc)
 	r := NewReflector(&testLW{}, &v1.Pod{}, store, 0)
 	listErr := errors.New("list error")
-	runErr := fmt.Errorf("failed to list %v: %v", r.expectedTypeName, listErr)
+	runErr := fmt.Errorf("context canceled")
 	_ = watch.NewFake()
 	r.listerWatcher = &testLW{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
@@ -120,11 +121,14 @@ func TestRunWithStopOptions(t *testing.T) {
 		},
 	}
 
-	go r.RunWithStopOptions(StopOptions{
+	ctx, cancel := context.WithCancel(context.Background())
+	go r.RunWithStopOptions(ctx, cancel, StopOptions{
 		OnListError: func(err error) bool {
 			return true
 		},
 	})
+	// sleep so the listerwatcher errors out
+	time.Sleep(10 * time.Millisecond)
 	select {
 	case <-r.stopHandle.Done():
 		if r.stopHandle.Err().Error() != runErr.Error() {

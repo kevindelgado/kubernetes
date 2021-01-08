@@ -25,7 +25,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -266,29 +266,30 @@ func (rq *Controller) worker(queue workqueue.RateLimitingInterface) func() {
 }
 
 // Run begins quota controller using the specified number of workers
-func (rq *Controller) Run(workers int, stopCh <-chan struct{}) {
+func (rq *Controller) Run(ctx context.Context, workers int) {
 	defer utilruntime.HandleCrash()
 	defer rq.queue.ShutDown()
 
 	klog.Infof("Starting resource quota controller")
+	klog.Infof("ctx %v", ctx)
 	defer klog.Infof("Shutting down resource quota controller")
 
 	if rq.quotaMonitor != nil {
-		go rq.quotaMonitor.Run(stopCh)
+		go rq.quotaMonitor.Run(ctx)
 	}
 
-	if !cache.WaitForNamedCacheSync("resource quota", stopCh, rq.informerSyncedFuncs...) {
+	if !cache.WaitForNamedCacheSync("resource quota", ctx.Done(), rq.informerSyncedFuncs...) {
 		return
 	}
 
 	// the workers that chug through the quota calculation backlog
 	for i := 0; i < workers; i++ {
-		go wait.Until(rq.worker(rq.queue), time.Second, stopCh)
-		go wait.Until(rq.worker(rq.missingUsageQueue), time.Second, stopCh)
+		go wait.Until(rq.worker(rq.queue), time.Second, ctx.Done())
+		go wait.Until(rq.worker(rq.missingUsageQueue), time.Second, ctx.Done())
 	}
 	// the timer for how often we do a full recalculation across all quotas
-	go wait.Until(func() { rq.enqueueAll() }, rq.resyncPeriod(), stopCh)
-	<-stopCh
+	go wait.Until(func() { rq.enqueueAll() }, rq.resyncPeriod(), ctx.Done())
+	<-ctx.Done()
 }
 
 // syncResourceQuotaFromKey syncs a quota key

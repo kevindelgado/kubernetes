@@ -17,6 +17,7 @@ limitations under the License.
 package garbagecollector
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
@@ -93,7 +94,8 @@ type GraphBuilder struct {
 
 	// stopCh drives shutdown. When a receive from it unblocks, monitors will shut down.
 	// This channel is also protected by monitorLock.
-	stopCh <-chan struct{}
+	//stopCh <-chan struct{}
+	ctx context.Context
 
 	// running tracks whether Run() has been called.
 	// it is protected by monitorLock.
@@ -253,7 +255,7 @@ func (gb *GraphBuilder) startMonitors() {
 	// that they don't get unexpected events on their work queues.
 	<-gb.informersStarted
 
-	gb.sharedInformers.StartWithStopOptions(gb.stopCh)
+	gb.sharedInformers.StartWithStopOptions(gb.ctx)
 	monitors := gb.monitors
 	for gvr := range monitors {
 		// TODO(kdelga): Should we only be doing this when ok?
@@ -294,20 +296,21 @@ func (gb *GraphBuilder) IsSynced() bool {
 
 // Run sets the stop channel and starts monitor execution until stopCh is
 // closed. Any running monitors will be stopped before Run returns.
-func (gb *GraphBuilder) Run(stopCh <-chan struct{}) {
+func (gb *GraphBuilder) Run(ctx context.Context) {
 	klog.Infof("GraphBuilder running")
 	defer klog.Infof("GraphBuilder stopping")
 
 	// Set up the stop channel.
 	gb.monitorLock.Lock()
-	gb.stopCh = stopCh
+	//gb.stopCh = stopChI
+	gb.ctx = ctx
 	gb.running = true
 	gb.monitorLock.Unlock()
 
 	// Start monitors and begin change processing until the stop channel is
 	// closed.
 	gb.startMonitors()
-	wait.Until(gb.runProcessGraphChanges, 1*time.Second, stopCh)
+	wait.Until(gb.runProcessGraphChanges, 1*time.Second, ctx.Done())
 
 	// reset monitors so that the graph builder can be safely re-run/synced.
 	gb.monitorLock.Lock()

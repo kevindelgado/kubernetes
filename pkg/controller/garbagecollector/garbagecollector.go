@@ -134,7 +134,7 @@ func (gc *GarbageCollector) resyncMonitors(deletableResources map[schema.GroupVe
 }
 
 // Run starts garbage collector workers.
-func (gc *GarbageCollector) Run(workers int, stopCh <-chan struct{}) {
+func (gc *GarbageCollector) Run(ctx context.Context, workers int) {
 	defer utilruntime.HandleCrash()
 	defer gc.attemptToDelete.ShutDown()
 	defer gc.attemptToOrphan.ShutDown()
@@ -143,9 +143,9 @@ func (gc *GarbageCollector) Run(workers int, stopCh <-chan struct{}) {
 	klog.Infof("Starting garbage collector controller")
 	defer klog.Infof("Shutting down garbage collector controller")
 
-	go gc.dependencyGraphBuilder.Run(stopCh)
+	go gc.dependencyGraphBuilder.Run(ctx)
 
-	if !cache.WaitForNamedCacheSync("garbage collector", stopCh, gc.dependencyGraphBuilder.IsSynced) {
+	if !cache.WaitForNamedCacheSync("garbage collector", ctx.Done(), gc.dependencyGraphBuilder.IsSynced) {
 		return
 	}
 
@@ -153,11 +153,11 @@ func (gc *GarbageCollector) Run(workers int, stopCh <-chan struct{}) {
 
 	// gc workers
 	for i := 0; i < workers; i++ {
-		go wait.Until(gc.runAttemptToDeleteWorker, 1*time.Second, stopCh)
-		go wait.Until(gc.runAttemptToOrphanWorker, 1*time.Second, stopCh)
+		go wait.Until(gc.runAttemptToDeleteWorker, 1*time.Second, ctx.Done())
+		go wait.Until(gc.runAttemptToOrphanWorker, 1*time.Second, ctx.Done())
 	}
 
-	<-stopCh
+	<-ctx.Done()
 }
 
 // resettableRESTMapper is a RESTMapper which is capable of resetting itself

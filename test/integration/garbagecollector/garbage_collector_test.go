@@ -259,9 +259,11 @@ func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, work
 		t.Fatalf("failed to create garbage collector: %v", err)
 	}
 
-	stopCh := make(chan struct{})
+	//stopCh := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
 	tearDown := func() {
-		close(stopCh)
+		//close(stopCh)
+		cancel()
 		result.TearDownFn()
 	}
 	syncPeriod := 5 * time.Second
@@ -271,9 +273,9 @@ func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, work
 			// client. This is a leaky abstraction and assumes behavior about the REST
 			// mapper, but we'll deal with it for now.
 			restMapper.Reset()
-		}, syncPeriod, stopCh)
-		go gc.Run(workers, stopCh)
-		go gc.Sync(clientSet.Discovery(), syncPeriod, stopCh)
+		}, syncPeriod, ctx.Done())
+		go gc.Run(ctx, workers)
+		go gc.Sync(clientSet.Discovery(), syncPeriod, ctx.Done())
 	}
 
 	if workerCount > 0 {

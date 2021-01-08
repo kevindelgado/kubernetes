@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/clock"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog/v2"
 )
 
 // This file implements a low-level controller that is used in
@@ -106,7 +108,7 @@ type Controller interface {
 	// on that Queue.  The other is to repeatedly Pop from the Queue
 	// and process with the Config's ProcessFunc.  Both of these
 	// continue until the stopOptions recognize a stop condition.
-	RunWithStopOptions(stopOptions StopOptions)
+	RunWithStopOptions(ctx context.Context, cancel context.CancelFunc, stopOptions StopOptions)
 
 	// Run is the legacy interface for running a controller that once called,
 	// can only be stopped by closing the stop channel.
@@ -131,23 +133,18 @@ func New(c *Config) Controller {
 
 // RunWithStopOptions begins processing items, and will continue until stopOptions recognizes a stop condition.
 // RunWithStopOptions blocks; call via go.
-func (c *controller) RunWithStopOptions(stopOptions StopOptions) {
+func (c *controller) RunWithStopOptions(ctx context.Context, cancel context.CancelFunc, stopOptions StopOptions) {
 	defer utilruntime.HandleCrash()
-	if stopOptions.ExternalStop != nil {
-		cancel := c.config.StopHandle.MergeChan(stopOptions.ExternalStop)
-		defer cancel()
-		stopOptions.ExternalStop = nil
-	}
 	go func() {
-		<-c.config.StopHandle.Done()
+		<-ctx.Done()
 		c.config.Queue.Close()
 	}()
-	r := NewReflectorWithStopHandle(
+	r := NewReflector(
 		c.config.ListerWatcher,
 		c.config.ObjectType,
 		c.config.Queue,
 		c.config.FullResyncPeriod,
-		c.config.StopHandle,
+		//c.config.StopHandle,
 	)
 	r.ShouldResync = c.config.ShouldResync
 	r.WatchListPageSize = c.config.WatchListPageSize
@@ -164,20 +161,52 @@ func (c *controller) RunWithStopOptions(stopOptions StopOptions) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		r.RunWithStopOptions(stopOptions)
+		r.RunWithStopOptions(ctx, cancel, stopOptions)
 	}()
 
 	// TODO: Does the process loop also need to be ran with stop options?
-	wait.Until(c.processLoop, time.Second, c.config.StopHandle.Done())
+	wait.Until(c.processLoop, time.Second, ctx.Done())
 	wg.Wait()
+	klog.Warningf("controller done")
 }
 
 // Run supports calling RunWithStopOptions with just a stop channel
 // that when closed, is the only stop condition that will stop the controller.
 func (c *controller) Run(stopCh <-chan struct{}) {
-	cancel := c.config.StopHandle.MergeChan(stopCh)
-	defer cancel()
-	c.RunWithStopOptions(StopOptions{})
+	defer utilruntime.HandleCrash()
+	go func() {
+		<-stopCh
+		c.config.Queue.Close()
+	}()
+	r := NewReflector(
+		c.config.ListerWatcher,
+		c.config.ObjectType,
+		c.config.Queue,
+		c.config.FullResyncPeriod,
+		//c.config.StopHandle,
+	)
+	r.ShouldResync = c.config.ShouldResync
+	r.WatchListPageSize = c.config.WatchListPageSize
+	r.clock = c.clock
+	if c.config.WatchErrorHandler != nil {
+		r.watchErrorHandler = c.config.WatchErrorHandler
+	}
+
+	c.reflectorMutex.Lock()
+	c.reflector = r
+	c.reflectorMutex.Unlock()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		//r.RunWithStopOptions(stopOptions)
+		r.Run(stopCh)
+	}()
+
+	// TODO: Does the process loop also need to be ran with stop options?
+	wait.Until(c.processLoop, time.Second, stopCh)
+	wg.Wait()
 }
 
 // Returns true once this controller has completed an initial resource listing
@@ -414,7 +443,7 @@ func newInformer(
 		ObjectType:       objType,
 		FullResyncPeriod: resyncPeriod,
 		RetryOnError:     false,
-		StopHandle:       NewStopHandle(),
+		//StopHandle:       NewStopHandle(),
 
 		Process: func(obj interface{}) error {
 			// from oldest to newest

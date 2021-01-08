@@ -17,6 +17,8 @@ limitations under the License.
 package informerfactory
 
 import (
+	"context"
+
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/metadata/metadatainformer"
@@ -28,7 +30,7 @@ type InformerFactory interface {
 	DoneChannelFor(resource schema.GroupVersionResource) (cache.DoneChannel, bool)
 	ForResource(resource schema.GroupVersionResource) (informers.GenericInformer, error)
 	Start(stopCh <-chan struct{})
-	StartWithStopOptions(stopCh <-chan struct{})
+	StartWithStopOptions(ctx context.Context)
 }
 
 type informerFactory struct {
@@ -57,9 +59,9 @@ func (i *informerFactory) Start(stopCh <-chan struct{}) {
 	i.metadataInformerFactory.Start(stopCh)
 }
 
-func (i *informerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
-	i.typedInformerFactory.StartWithStopOptions(stopCh)
-	i.metadataInformerFactory.StartWithStopOptions(stopCh)
+func (i *informerFactory) StartWithStopOptions(ctx context.Context) {
+	i.typedInformerFactory.StartWithStopOptions(ctx)
+	i.metadataInformerFactory.StartWithStopOptions(ctx)
 }
 
 // NewInformerFactory creates a new InformerFactory which works with both typed

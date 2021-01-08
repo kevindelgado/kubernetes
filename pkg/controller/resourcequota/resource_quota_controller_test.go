@@ -17,6 +17,7 @@ limitations under the License.
 package resourcequota
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -25,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -103,7 +104,8 @@ func (errorLister) ByNamespace(namespace string) cache.GenericNamespaceLister {
 
 type quotaController struct {
 	*Controller
-	stop chan struct{}
+	//stop chan struct{}
+	ctx context.Context
 }
 
 func setupQuotaController(t *testing.T, kubeClient kubernetes.Interface, lister quota.ListerForResourceFunc, discoveryFunc NamespacedResourcesFunc) quotaController {
@@ -126,9 +128,10 @@ func setupQuotaController(t *testing.T, kubeClient kubernetes.Interface, lister 
 	if err != nil {
 		t.Fatal(err)
 	}
-	stop := make(chan struct{})
-	informerFactory.Start(stop)
-	return quotaController{qc, stop}
+	//stop := make(chan struct{})
+	ctx := context.Background()
+	informerFactory.Start(ctx.Done())
+	return quotaController{qc, ctx}
 }
 
 func newTestPods() []runtime.Object {
@@ -780,7 +783,7 @@ func TestSyncResourceQuota(t *testing.T) {
 			testCase.errorGVR: newErrorLister(),
 		}
 		qc := setupQuotaController(t, kubeClient, mockListerForResourceFunc(listersForResourceConfig), mockDiscoveryFunc)
-		defer close(qc.stop)
+		//defer close(qc.stop)
 
 		if err := qc.syncResourceQuota(&testCase.quota); err != nil {
 			if len(testCase.expectedError) == 0 || !strings.Contains(err.Error(), testCase.expectedError) {
@@ -844,7 +847,7 @@ func TestAddQuota(t *testing.T) {
 	}
 
 	qc := setupQuotaController(t, kubeClient, mockListerForResourceFunc(listersForResourceConfig), mockDiscoveryFunc)
-	defer close(qc.stop)
+	//defer close(qc.stop)
 
 	testCases := []struct {
 		name             string
@@ -1057,7 +1060,7 @@ func TestDiscoverySync(t *testing.T) {
 		secrets: newGenericLister(secrets.GroupResource(), []runtime.Object{}),
 	}
 	qc := setupQuotaController(t, kubeClient, mockListerForResourceFunc(listersForResourceConfig), fakeDiscoveryClient.ServerPreferredNamespacedResources)
-	defer close(qc.stop)
+	//defer close(qc.stop)
 
 	stopSync := make(chan struct{})
 	defer close(stopSync)

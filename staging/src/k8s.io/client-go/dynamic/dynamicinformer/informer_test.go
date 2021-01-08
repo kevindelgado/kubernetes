@@ -255,25 +255,29 @@ func TestStoppableDynamicSharedInformerFactory(t *testing.T) {
 	onListErrorFunc := func(error) bool {
 		return true
 	}
-	fakeClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), []runtime.Object{}...)
+	testObject := newUnstructured("extensions/v1beta1", "Deployment", "ns-foo", "name-foo")
+	fakeClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), []runtime.Object{testObject}...)
 	target := dynamicinformer.NewDynamicSharedInformerFactoryWithOptions(fakeClient, 0, dynamicinformer.WithOnListError(onListErrorFunc))
 
 	gvr := schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"}
 	informerListerForGvr := target.ForResource(gvr)
-	target.StartWithStopOptions(ctx.Done())
+	infCtx, infCancel := context.WithCancel(ctx)
+	target.StartWithStopOptions(infCtx)
+	// stop the individual informer
+	go infCancel()
 
-	go func() {
-		stopCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		informerListerForGvr.Informer().StopHandle().MergeChan(stopCtx.Done())
-	}()
+	//go func() {
+	//	stopCtx, cancel := context.WithCancel(ctx)
+	//	defer cancel()
+	//	informerListerForGvr.Informer().StopHandle().MergeChan(stopCtx.Done())
+	//}()
 
 	// sleep to ensure informer gets cancelled.
 	time.Sleep(10 * time.Millisecond)
 	select {
 	case <-informerListerForGvr.Informer().StopHandle().Done():
 		err := informerListerForGvr.Informer().StopHandle().Err()
-		if err != nil {
+		if err == nil || err.Error() != "context canceled" {
 			t.Errorf("unexpected error %v", err)
 		}
 		return

@@ -17,6 +17,7 @@ limitations under the License.
 package app
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -129,6 +130,7 @@ func TestController_DiscoveryError(t *testing.T) {
 			InformerFactory:                 testInformerFactory,
 			ObjectOrMetadataInformerFactory: testInformerFactory,
 			InformersStarted:                make(chan struct{}),
+			Context:                         context.Background(),
 		}
 		for funcName, controllerInit := range controllerInitFuncMap {
 			_, _, err := controllerInit(ctx)

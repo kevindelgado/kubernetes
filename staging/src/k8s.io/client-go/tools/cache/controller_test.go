@@ -55,7 +55,7 @@ func Example() {
 		ObjectType:       &v1.Pod{},
 		FullResyncPeriod: time.Millisecond * 100,
 		RetryOnError:     false,
-		StopHandle:       NewStopHandle(make(chan struct{})),
+		//StopHandle:       NewStopHandle(make(chan struct{})),
 
 		// Let's implement a simple controller that just deletes
 		// everything that comes in.

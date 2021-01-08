@@ -17,6 +17,7 @@ limitations under the License.
 package resourcequota
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -79,6 +80,7 @@ type QuotaMonitor struct {
 	// stopCh drives shutdown. When a receive from it unblocks, monitors will shut down.
 	// This channel is also protected by monitorLock.
 	stopCh <-chan struct{}
+	ctx    context.Context
 
 	// running tracks whether Run() has been called.
 	// it is protected by monitorLock.
@@ -268,7 +270,7 @@ func (qm *QuotaMonitor) StartMonitors() {
 	for _, monitor := range monitors {
 		if monitor.stopCh == nil {
 			monitor.stopCh = make(chan struct{})
-			qm.informerFactory.StartWithStopOptions(qm.stopCh)
+			qm.informerFactory.StartWithStopOptions(qm.ctx)
 			go monitor.Run()
 			started++
 		}
@@ -300,20 +302,21 @@ func (qm *QuotaMonitor) IsSynced() bool {
 
 // Run sets the stop channel and starts monitor execution until stopCh is
 // closed. Any running monitors will be stopped before Run returns.
-func (qm *QuotaMonitor) Run(stopCh <-chan struct{}) {
+func (qm *QuotaMonitor) Run(ctx context.Context) {
 	klog.Infof("QuotaMonitor running")
 	defer klog.Infof("QuotaMonitor stopping")
 
 	// Set up the stop channel.
 	qm.monitorLock.Lock()
-	qm.stopCh = stopCh
+	//qm.stopCh = stopCh
+	qm.ctx = ctx
 	qm.running = true
 	qm.monitorLock.Unlock()
 
 	// Start monitors and begin change processing until the stop channel is
 	// closed.
 	qm.StartMonitors()
-	wait.Until(qm.runProcessResourceChanges, 1*time.Second, stopCh)
+	wait.Until(qm.runProcessResourceChanges, 1*time.Second, ctx.Done())
 
 	// Stop any running monitors.
 	qm.monitorLock.Lock()
