@@ -19,6 +19,7 @@ limitations under the License.
 package externalversions
 
 import (
+	"context"
 	reflect "reflect"
 	sync "sync"
 	time "time"
@@ -170,8 +171,8 @@ func (f *sharedInformerFactory) InformerFor(obj runtime.Object, newFunc internal
 // Because the sharedInformerFactory is used only with builtin types, there is no reason why StartWithStopOptions
 // should ever be used.
 // Dynamicinformer and metadatainformer factories actually implement StartWithStopOptions.
-func (f *sharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
-	f.Start(stopCh)
+func (f *sharedInformerFactory) StartWithStopOptions(ctx context.Context) {
+	f.Start(ctx.Done())
 }
 
 // DoneChannelFor returns the done channel indicating the when the resource's informer is stopped.
@@ -186,7 +187,7 @@ func (f *sharedInformerFactory) DoneChannelFor(resource schema.GroupVersionResou
 // API group versions.
 type SharedInformerFactory interface {
 	internalinterfaces.SharedInformerFactory
-	StartWithStopOptions(stopCh <-chan struct{})
+	StartWithStopOptions(ctx context.Context)
 	DoneChannelFor(resource schema.GroupVersionResource) (cache.DoneChannel, bool)
 	ForResource(resource schema.GroupVersionResource) (GenericInformer, error)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
