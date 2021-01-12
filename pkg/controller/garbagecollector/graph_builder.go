@@ -92,9 +92,8 @@ type GraphBuilder struct {
 	// After that it is safe to start them here, before that it is not.
 	informersStarted <-chan struct{}
 
-	// stopCh drives shutdown. When a receive from it unblocks, monitors will shut down.
+	// ctx drives shutdown. When a receive from it unblocks, monitors will shut down.
 	// This channel is also protected by monitorLock.
-	//stopCh <-chan struct{}
 	ctx context.Context
 
 	// running tracks whether Run() has been called.
@@ -258,19 +257,14 @@ func (gb *GraphBuilder) startMonitors() {
 	gb.sharedInformers.StartWithStopOptions(gb.ctx)
 	monitors := gb.monitors
 	for gvr := range monitors {
-		// TODO(kdelga): Should we only be doing this when ok?
 		if doneCh, ok := gb.sharedInformers.DoneChannelFor(gvr); ok {
-			klog.Warningf("able to get done channel for gvr %v", gvr)
 			go func() {
 				<-doneCh
 				// push to set of recently stopped resources.
 				gb.stoppedResourcesLock.Lock()
 				defer gb.stoppedResourcesLock.Unlock()
-				klog.Warningf("done channel stopped for gvr %v", gvr)
 				gb.stoppedResources[gvr] = struct{}{}
 			}()
-		} else {
-			klog.Warningf("failed to get done channel for gvr %v", gvr)
 		}
 	}
 	klog.V(4).Infof("all %d monitors have been started", len(gb.monitors))
@@ -298,7 +292,7 @@ func (gb *GraphBuilder) IsSynced() bool {
 	return true
 }
 
-// Run sets the stop channel and starts monitor execution until stopCh is
+// Run sets the context and starts monitor execution until ctx.Done() is
 // closed. Any running monitors will be stopped before Run returns.
 func (gb *GraphBuilder) Run(ctx context.Context) {
 	klog.Infof("GraphBuilder running")
@@ -306,7 +300,6 @@ func (gb *GraphBuilder) Run(ctx context.Context) {
 
 	// Set up the stop channel.
 	gb.monitorLock.Lock()
-	//gb.stopCh = stopChI
 	gb.ctx = ctx
 	gb.running = true
 	gb.monitorLock.Unlock()

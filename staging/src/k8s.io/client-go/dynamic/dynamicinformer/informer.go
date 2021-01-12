@@ -169,7 +169,6 @@ func (f *dynamicSharedInformerFactory) StartWithStopOptions(ctx context.Context)
 		onListError = f.onListError
 	}
 	stopOptions := cache.StopOptions{
-		//ExternalStop: stopCh,
 		OnListError: onListError,
 	}
 	for informerType, informer := range f.informers {
@@ -183,7 +182,6 @@ func (f *dynamicSharedInformerFactory) StartWithStopOptions(ctx context.Context)
 				f.informerStopped(informerType)
 			}(infCtx, infCancel)
 			f.startedInformers[informerType] = true
-			//f.stoppableInformers[informerType] = informer.Informer().StopHandle().Done()
 			f.stoppableInformers[informerType] = infCtx.Done()
 		}
 	}

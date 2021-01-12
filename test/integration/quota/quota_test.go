@@ -85,8 +85,6 @@ func TestQuota(t *testing.T) {
 	ns2 := framework.CreateTestingNamespace("non-quotaed", s, t)
 	defer framework.DeleteTestingNamespace(ns2, s, t)
 
-	//controllerCh := make(chan struct{})
-	//defer close(controllerCh)
 	ctx := context.Background()
 
 	informers := informers.NewSharedInformerFactory(clientset, controller.NoResyncPeriodFunc())
@@ -284,8 +282,6 @@ func TestQuotaLimitedResourceDenial(t *testing.T) {
 	ns := framework.CreateTestingNamespace("quota", s, t)
 	defer framework.DeleteTestingNamespace(ns, s, t)
 
-	//controllerCh := make(chan struct{})
-	//defer close(controllerCh)
 	ctx := context.Background()
 
 	informers := informers.NewSharedInformerFactory(clientset, controller.NoResyncPeriodFunc())

@@ -104,7 +104,6 @@ func (errorLister) ByNamespace(namespace string) cache.GenericNamespaceLister {
 
 type quotaController struct {
 	*Controller
-	//stop chan struct{}
 	ctx context.Context
 }
 
@@ -128,7 +127,6 @@ func setupQuotaController(t *testing.T, kubeClient kubernetes.Interface, lister 
 	if err != nil {
 		t.Fatal(err)
 	}
-	//stop := make(chan struct{})
 	ctx := context.Background()
 	informerFactory.Start(ctx.Done())
 	return quotaController{qc, ctx}
@@ -783,7 +781,6 @@ func TestSyncResourceQuota(t *testing.T) {
 			testCase.errorGVR: newErrorLister(),
 		}
 		qc := setupQuotaController(t, kubeClient, mockListerForResourceFunc(listersForResourceConfig), mockDiscoveryFunc)
-		//defer close(qc.stop)
 
 		if err := qc.syncResourceQuota(&testCase.quota); err != nil {
 			if len(testCase.expectedError) == 0 || !strings.Contains(err.Error(), testCase.expectedError) {
@@ -847,7 +844,6 @@ func TestAddQuota(t *testing.T) {
 	}
 
 	qc := setupQuotaController(t, kubeClient, mockListerForResourceFunc(listersForResourceConfig), mockDiscoveryFunc)
-	//defer close(qc.stop)
 
 	testCases := []struct {
 		name             string
@@ -1060,7 +1056,6 @@ func TestDiscoverySync(t *testing.T) {
 		secrets: newGenericLister(secrets.GroupResource(), []runtime.Object{}),
 	}
 	qc := setupQuotaController(t, kubeClient, mockListerForResourceFunc(listersForResourceConfig), fakeDiscoveryClient.ServerPreferredNamespacedResources)
-	//defer close(qc.stop)
 
 	stopSync := make(chan struct{})
 	defer close(stopSync)

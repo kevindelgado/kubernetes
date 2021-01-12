@@ -207,136 +207,9 @@ type OnListErrorFunc func(error) bool
 // on when and why the informer stopped.
 type StopHandle context.Context
 
-//type StopHandle interface {
-//	// Done indicates when the informer has been stopped.
-//	Done() DoneChannel
-//	// Err returns the error (if applicable) that caused the shared informer to be stopped.
-//	// A nil error after h.Done is closed means that the informer was stopped externally.
-//	// Err can only be called after h.Done() has closed otherwise it will return
-//	// nil.
-//	Err() error
-//	// Close allows for stopping the ifnormer (and closing the done channel).
-//	Close()
-//	// WithError provides a way to set the error on the stop handle.
-//	WithError(err error)
-//	// MergeChan takes a chan and merges with the done channel such that the done channel closes
-//	// when either the channel being merged closes or an explicit Close() is called on the stop handle.
-//	MergeChan(ch <-chan struct{}) context.CancelFunc
-//}
-//
-//// stopHandle implements the StopHandle interface.
-//type stopHandle struct {
-//	// stopWrite is used to close the stopRead channel when the informer's
-//	// underlying controller/reflector stop running.
-//	stopWrite  chan<- struct{}
-//	stopWrites []chan<- struct{}
-//	// stopRead is closed in order to stop the informer.
-//	stopRead  <-chan struct{}
-//	stopReads []<-chan struct{}
-//	// err gets populated by the cause of the informer stopping
-//	// or is nil because the stopRead channel was closed.
-//	err            error
-//	stopHandleLock sync.Mutex
-//}
-//
-//// NewStopHandle creates a stop handle from a bidirectonal stop channel.
-//func NewStopHandle() StopHandle {
-//	stop := make(chan struct{})
-//	handle := &stopHandle{
-//		stopWrite: stop,
-//	}
-//	handle.watchStopWrite(stop)
-//	return handle
-//}
-//
-//func (h *stopHandle) watchStopWrite(ch <-chan struct{}) {
-//	go func() {
-//		<-ch
-//		h.stopHandleLock.Lock()
-//		defer h.stopHandleLock.Unlock()
-//		for _, ch := range h.stopWrites {
-//			close(ch)
-//		}
-//	}()
-//}
-//
-//// Done returns a channel that's closed when the informer is stopped.
-//func (h *stopHandle) Done() DoneChannel {
-//	ch := make(chan struct{})
-//	h.stopHandleLock.Lock()
-//	defer h.stopHandleLock.Unlock()
-//	h.stopWrites = append(h.stopWrites, ch)
-//	return ch
-//}
-//
-//// Err returns the error (if applicable) that caused the shared informer to be stopped.
-//// A nil error after h.Done is closed means that the informer was stopped externally.
-//// Err can only be called after h.Done() has closed otherwise it will return
-//// nil.
-//func (h *stopHandle) Err() error {
-//	h.stopHandleLock.Lock()
-//	defer h.stopHandleLock.Unlock()
-//	return h.err
-//}
-//
-//// WithError provides a way to set the error on the stop handle.
-//// TODO: is it ok to just directly write the err or should we be chaining errors together some way?
-//func (h *stopHandle) WithError(err error) {
-//	h.stopHandleLock.Lock()
-//	defer h.stopHandleLock.Unlock()
-//	h.err = err
-//}
-//
-//// Close allows for stopping the ifnormer (and closing the done channel).
-//func (h *stopHandle) Close() {
-//	h.stopHandleLock.Lock()
-//	defer h.stopHandleLock.Unlock()
-//	close(h.stopWrite)
-//}
-//
-//// MergeChan takes a chan and merges with the done channel such that the done channel closes
-//// when either the channel being merged closes or an explicit Close() is called on the stop handle.
-//func (h *stopHandle) MergeChan(ch <-chan struct{}) context.CancelFunc {
-//	h.stopHandleLock.Lock()
-//	newRead, cancel := mergeChan(h.stopRead, ch)
-//	h.stopReads = append(h.stopReads, newRead)
-//	h.stopHandleLock.Unlock()
-//	//h.watchStopWrite(newRead)
-//	return cancel
-//}
-//
-//// mergeChan returns a channel that is closed when any of the input channels are signaled.
-//// The caller must call the returned CancelFunc to ensure no resources are leaked.
-//func mergeChan(a, b <-chan struct{}) (<-chan struct{}, context.CancelFunc) {
-//	var once sync.Once
-//	out := make(chan struct{})
-//	cancel := make(chan struct{})
-//	cancelFunc := func() {
-//		once.Do(func() {
-//			close(cancel)
-//		})
-//	}
-//	go func() {
-//		defer close(out)
-//		select {
-//		case <-a:
-//		case <-b:
-//		case <-cancel:
-//		}
-//	}()
-//
-//	return out, cancelFunc
-//}
-
 // StopOptions let the caller specify which conditions to stop the informer.
+// TODO: Should we get rid of StopOptions (and just use OnListError) until we actually have more than one stop option?
 type StopOptions struct {
-	// ExternalStop supplies the channel that when closed,
-	// signals the informer to stop.
-	// This is opposed to the StopHandle that lives on the sharedIndexInformer
-	// that the informer/reflector have control over and must stop when the informer stops.
-	//ExternalStop <-chan struct{}
-	//StopHandle StopHandle
-
 	// OnListError inspects errors returned from the informer's underlying reflector,
 	// and based on the error determines whether or not to stop the informer.
 	OnListError OnListErrorFunc
@@ -378,7 +251,6 @@ func NewSharedIndexInformer(lw ListerWatcher, exampleObject runtime.Object, defa
 		defaultEventHandlerResyncPeriod: defaultEventHandlerResyncPeriod,
 		cacheMutationDetector:           NewCacheMutationDetector(fmt.Sprintf("%T", exampleObject)),
 		clock:                           realClock,
-		//stopHandle:                      NewStopHandle(),
 	}
 	return sharedIndexInformer
 }
@@ -566,7 +438,6 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 
 		Process:           s.HandleDeltas,
 		WatchErrorHandler: s.watchErrorHandler,
-		//StopHandle:        s.stopHandle,
 	}
 
 	func() {
@@ -592,20 +463,10 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 		s.stopped = true // Don't want any new listeners
 	}()
 
-	//cancel := s.stopHandle.MergeChan(stopOptions.ExternalStop)
-	//defer cancel()
-	//// TODO: Setting external stop to nil seems pretty weird.
-	//// It's done because RunWithStopOptions is also publically
-	//// exposed on the controller and reflector and we need to also
-	//// merge the external stop if one is passed in there externally
-	//// rather than from a call from here (sharedIndexInformer's Run).
-	////
-	//// So in order to avoid re merging in controller and reflector,
-	//// we nil it out after it's been merged, but maybe there's a cleaner way?
-	//stopOptions.ExternalStop = nil
 	s.controller.RunWithStopOptions(ctrlCtx, ctrlCancel, stopOptions)
 }
 
+// TODO(kdelga): factor this and RunWithStopOptions out.
 func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 
@@ -624,7 +485,6 @@ func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 
 		Process:           s.HandleDeltas,
 		WatchErrorHandler: s.watchErrorHandler,
-		//StopHandle:        s.stopHandle,
 	}
 
 	func() {
@@ -651,18 +511,6 @@ func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 	}()
 
 	s.controller.Run(stopCh)
-	//cancel := s.stopHandle.MergeChan(stopOptions.ExternalStop)
-	//defer cancel()
-	//// TODO: Setting external stop to nil seems pretty weird.
-	//// It's done because RunWithStopOptions is also publically
-	//// exposed on the controller and reflector and we need to also
-	//// merge the external stop if one is passed in there externally
-	//// rather than from a call from here (sharedIndexInformer's Run).
-	////
-	//// So in order to avoid re merging in controller and reflector,
-	//// we nil it out after it's been merged, but maybe there's a cleaner way?
-	//stopOptions.ExternalStop = nil
-	//s.controller.RunWithStopOptions(ctx, stopOptions)
 }
 
 func (s *sharedIndexInformer) HasSynced() bool {

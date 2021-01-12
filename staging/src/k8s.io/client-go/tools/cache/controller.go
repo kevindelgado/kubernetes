@@ -25,7 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/clock"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/klog/v2"
 )
 
 // This file implements a low-level controller that is used in
@@ -144,7 +143,6 @@ func (c *controller) RunWithStopOptions(ctx context.Context, cancel context.Canc
 		c.config.ObjectType,
 		c.config.Queue,
 		c.config.FullResyncPeriod,
-		//c.config.StopHandle,
 	)
 	r.ShouldResync = c.config.ShouldResync
 	r.WatchListPageSize = c.config.WatchListPageSize
@@ -164,14 +162,13 @@ func (c *controller) RunWithStopOptions(ctx context.Context, cancel context.Canc
 		r.RunWithStopOptions(ctx, cancel, stopOptions)
 	}()
 
-	// TODO: Does the process loop also need to be ran with stop options?
 	wait.Until(c.processLoop, time.Second, ctx.Done())
 	wg.Wait()
-	klog.Warningf("controller done")
 }
 
 // Run supports calling RunWithStopOptions with just a stop channel
 // that when closed, is the only stop condition that will stop the controller.
+// TODO(kdelga): factor this and RunWithStopOptions out.
 func (c *controller) Run(stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 	go func() {
@@ -183,7 +180,6 @@ func (c *controller) Run(stopCh <-chan struct{}) {
 		c.config.ObjectType,
 		c.config.Queue,
 		c.config.FullResyncPeriod,
-		//c.config.StopHandle,
 	)
 	r.ShouldResync = c.config.ShouldResync
 	r.WatchListPageSize = c.config.WatchListPageSize
@@ -200,11 +196,9 @@ func (c *controller) Run(stopCh <-chan struct{}) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		//r.RunWithStopOptions(stopOptions)
 		r.Run(stopCh)
 	}()
 
-	// TODO: Does the process loop also need to be ran with stop options?
 	wait.Until(c.processLoop, time.Second, stopCh)
 	wg.Wait()
 }
@@ -443,7 +437,6 @@ func newInformer(
 		ObjectType:       objType,
 		FullResyncPeriod: resyncPeriod,
 		RetryOnError:     false,
-		//StopHandle:       NewStopHandle(),
 
 		Process: func(obj interface{}) error {
 			// from oldest to newest

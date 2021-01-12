@@ -175,12 +175,6 @@ func TestStoppableMetadataSharedInformerFactory(t *testing.T) {
 	target.StartWithStopOptions(infCtx)
 	go infCancel()
 
-	//go func() {
-	//	stopCtx, cancel := context.WithCancel(ctx)
-	//	defer cancel()
-	//	informerListerForGvr.Informer().StopHandle().MergeChan(stopCtx.Done())
-	//}()
-
 	// sleep to ensure informer gets cancelled.
 	time.Sleep(10 * time.Millisecond)
 	select {

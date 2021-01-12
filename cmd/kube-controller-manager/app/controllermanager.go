@@ -240,7 +240,7 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 		} else {
 			clientBuilder = rootClientBuilder
 		}
-		controllerContext, err := CreateControllerContext(c, rootClientBuilder, clientBuilder, ctx)
+		controllerContext, err := CreateControllerContext(ctx, c, rootClientBuilder, clientBuilder)
 		if err != nil {
 			klog.Fatalf("error building controller context: %v", err)
 		}
@@ -334,8 +334,9 @@ type ControllerContext struct {
 	// ExternalLoops is for a kube-controller-manager running with a cloud-controller-manager
 	LoopMode ControllerLoopMode
 
-	// Stop is the stop channel
-	Stop    <-chan struct{}
+	// Stop is the stop channel. (Deprecated, use Context.Done() instead)
+	Stop <-chan struct{}
+	// Context is the go context.
 	Context context.Context
 
 	// InformersStarted is closed after all of the controllers have been initialized and are running.  After this point it is safe,
@@ -467,7 +468,7 @@ func GetAvailableResources(clientBuilder clientbuilder.ControllerClientBuilder) 
 // CreateControllerContext creates a context struct containing references to resources needed by the
 // controllers such as the cloud provider and clientBuilder. rootClientBuilder is only used for
 // the shared-informers client and token controller.
-func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clientBuilder clientbuilder.ControllerClientBuilder, ctx context.Context) (ControllerContext, error) {
+func CreateControllerContext(ctx context.Context, s *config.CompletedConfig, rootClientBuilder, clientBuilder clientbuilder.ControllerClientBuilder) (ControllerContext, error) {
 	versionedClient := rootClientBuilder.ClientOrDie("shared-informers")
 
 	// always stop informers when the ListAndWatch errors out

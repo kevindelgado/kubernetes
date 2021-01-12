@@ -259,10 +259,8 @@ func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, work
 		t.Fatalf("failed to create garbage collector: %v", err)
 	}
 
-	//stopCh := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	tearDown := func() {
-		//close(stopCh)
 		cancel()
 		result.TearDownFn()
 	}

@@ -29,7 +29,6 @@ import (
 	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/metadata/metadatalister"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/klog/v2"
 )
 
 // SharedInformerOption defines the functional option type for SharedInformerFactory.
@@ -149,7 +148,6 @@ func (f *metadataSharedInformerFactory) Start(stopCh <-chan struct{}) {
 func (f *metadataSharedInformerFactory) informerStopped(informerType schema.GroupVersionResource) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
-	klog.Warningf("informerStopped on gvr %v", informerType)
 	delete(f.startedInformers, informerType)
 	delete(f.informers, informerType)
 }
@@ -169,7 +167,6 @@ func (f *metadataSharedInformerFactory) StartWithStopOptions(ctx context.Context
 		onListError = f.onListError
 	}
 	stopOptions := cache.StopOptions{
-		//ExternalStop: stopCh,
 		OnListError: onListError,
 	}
 	for informerType, informer := range f.informers {
@@ -178,17 +175,11 @@ func (f *metadataSharedInformerFactory) StartWithStopOptions(ctx context.Context
 		if !f.startedInformers[informerType] {
 			infCtx, infCancel := context.WithCancel(ctx)
 			go func(ctx context.Context, cancel context.CancelFunc) {
-				klog.Warningf("calling RWSO on type %v", informerType)
 				informer.Informer().RunWithStopOptions(ctx, stopOptions)
-				klog.Warningf("RWSO done on type %v", informerType)
-				//<-informer.Informer().StopHandle().Done()
 				cancel()
-				klog.Warningf("infCtx done on type %v", informerType)
 				f.informerStopped(informerType)
 			}(infCtx, infCancel)
-			klog.Warningf("informer started on type %v", informerType)
 			f.startedInformers[informerType] = true
-			//f.stoppableInformers[informerType] = informer.Informer().StopHandle().Done()
 			f.stoppableInformers[informerType] = infCtx.Done()
 
 		}

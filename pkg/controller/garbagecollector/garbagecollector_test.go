@@ -116,8 +116,6 @@ func TestGarbageCollectorConstruction(t *testing.T) {
 	assert.Equal(t, 1, len(gc.dependencyGraphBuilder.monitors))
 
 	// Make sure the syncing mechanism also works after Run() has been called
-	//stopCh := make(chan struct{})
-	//defer close(stopCh)
 	ctx := context.Background()
 	go gc.Run(ctx, 1)
 
@@ -203,7 +201,6 @@ func testServerAndClientConfig(handler func(http.ResponseWriter, *http.Request))
 
 type garbageCollector struct {
 	*GarbageCollector
-	//stop chan struct{}
 	stop   <-chan struct{}
 	cancel context.CancelFunc
 }
@@ -222,7 +219,6 @@ func setupGC(t *testing.T, config *restclient.Config) garbageCollector {
 	if err != nil {
 		t.Fatal(err)
 	}
-	//stop := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	go sharedInformers.StartWithStopOptions(ctx)
 	return garbageCollector{gc, ctx.Done(), cancel}
@@ -857,8 +853,6 @@ func TestGarbageCollectorSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	//stopCh := make(chan struct{})
-	//defer close(stopCh)
 	ctx := context.Background()
 	go gc.Run(ctx, 1)
 	// The pseudo-code of GarbageCollector.Sync():
