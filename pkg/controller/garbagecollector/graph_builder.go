@@ -260,13 +260,17 @@ func (gb *GraphBuilder) startMonitors() {
 	for gvr := range monitors {
 		// TODO(kdelga): Should we only be doing this when ok?
 		if doneCh, ok := gb.sharedInformers.DoneChannelFor(gvr); ok {
+			klog.Warningf("able to get done channel for gvr %v", gvr)
 			go func() {
 				<-doneCh
 				// push to set of recently stopped resources.
 				gb.stoppedResourcesLock.Lock()
 				defer gb.stoppedResourcesLock.Unlock()
+				klog.Warningf("done channel stopped for gvr %v", gvr)
 				gb.stoppedResources[gvr] = struct{}{}
 			}()
+		} else {
+			klog.Warningf("failed to get done channel for gvr %v", gvr)
 		}
 	}
 	klog.V(4).Infof("all %d monitors have been started", len(gb.monitors))

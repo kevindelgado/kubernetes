@@ -175,14 +175,13 @@ func (f *dynamicSharedInformerFactory) StartWithStopOptions(ctx context.Context)
 	for informerType, informer := range f.informers {
 		informerType := informerType
 		informer := informer
-		infCtx, _ := context.WithCancel(ctx)
+		infCtx, infCancel := context.WithCancel(ctx)
 		if !f.startedInformers[informerType] {
-			go func() {
-				defer f.informerStopped(informerType)
-				informer.Informer().RunWithStopOptions(infCtx, stopOptions)
-				//<-informer.Informer().StopHandle().Done()
-				<-infCtx.Done()
-			}()
+			go func(ctx context.Context, cancel context.CancelFunc) {
+				informer.Informer().RunWithStopOptions(ctx, stopOptions)
+				cancel()
+				f.informerStopped(informerType)
+			}(infCtx, infCancel)
 			f.startedInformers[informerType] = true
 			//f.stoppableInformers[informerType] = informer.Informer().StopHandle().Done()
 			f.stoppableInformers[informerType] = infCtx.Done()
