@@ -47,17 +47,17 @@ type dynamicSharedInformerFactory struct {
 	startedInformers   map[schema.GroupVersionResource]bool
 	stoppableInformers map[schema.GroupVersionResource]cache.DoneChannel
 	tweakListOptions   TweakListOptionsFunc
-	onListError        cache.StopOnListErrorFunc
+	stopOnListError    cache.StopOnListErrorFunc
 }
 
 var _ DynamicSharedInformerFactory = &dynamicSharedInformerFactory{}
 
-// WithOnListError sets the onListErrFunc that is added to the stop options
+// WithStopOnListError sets the onListErrFunc that is added to the stop options
 // when calling StartWithStopOptions.
 // This function results in every informer in this factory getting the same stop options.
-func WithOnListError(onListError cache.StopOnListErrorFunc) DynamicSharedInformerOption {
+func WithStopOnListError(stopOnListError cache.StopOnListErrorFunc) DynamicSharedInformerOption {
 	return func(factory *dynamicSharedInformerFactory) *dynamicSharedInformerFactory {
-		factory.onListError = onListError
+		factory.stopOnListError = stopOnListError
 		return factory
 	}
 }
@@ -109,13 +109,31 @@ func NewDynamicSharedInformerFactoryWithOptions(client dynamic.Interface, defaul
 	return factory
 }
 
-// DoneChannelFor returns the done channel indicating the when the resource's informer is stopped.
-func (f *dynamicSharedInformerFactory) DoneChannelFor(gvr schema.GroupVersionResource) (cache.DoneChannel, bool) {
+//// DoneChannelFor returns the done channel indicating the when the resource's informer is stopped.
+//func (f *dynamicSharedInformerFactory) DoneChannelFor(gvr schema.GroupVersionResource) (cache.DoneChannel, bool) {
+//	f.lock.Lock()
+//	defer f.lock.Unlock()
+//
+//	doneCh, ok := f.stoppableInformers[gvr]
+//	return doneCh, ok
+//}
+
+// ForExistingStoppableResource returns the informer and DoneCHannel for a given resource.
+// If the informer returned is nil, ForResource must be called first in order to create the informer
+// and add it to the factory's informers slice.
+// If the informer does exist, than the DoneChannel can be used to see when the specific informer has stopped.
+// The informer is returned alongside the DoneChannel to prevent races where a stopped informer is returned.
+func (f *dynamicSharedInformerFactory) ForExistingStoppableResource(gvr schema.GroupVersionResource) (informers.GenericInformer, cache.DoneChannel, bool) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
+	informer, exists := f.informers[gvr]
+	if !exists {
+		return nil, nil, false
+	}
+
 	doneCh, ok := f.stoppableInformers[gvr]
-	return doneCh, ok
+	return informer, doneCh, ok
 }
 
 func (f *dynamicSharedInformerFactory) ForResource(gvr schema.GroupVersionResource) informers.GenericInformer {
@@ -142,21 +160,22 @@ func (f *dynamicSharedInformerFactory) informerStopped(informerType schema.Group
 }
 
 // Start initializes all requested informers with the stop options provided, defaulting to
-// the old, non-existant stop options (only stopping via closure of stopCh).
+// the old, non-existent stop options (only stopping via closure of stopCh).
 // It makes sure remove an informer from the list of informers and started informers when the informer is stopped
 // to prevent a race where InformerFor gives the user back a stopped informer that will never be started again.
 func (f *dynamicSharedInformerFactory) Start(stopCh <-chan struct{}) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
-	onListError := func(error) bool {
+	// default stopOnListError is to never stop
+	stopOnListError := func(error) bool {
 		return false
 	}
-	if f.onListError != nil {
-		onListError = f.onListError
+	if f.stopOnListError != nil {
+		stopOnListError = f.stopOnListError
 	}
 	stopOptions := cache.StopOptions{
-		StopOnListError: onListError,
+		StopOnListError: stopOnListError,
 	}
 	for informerType, informer := range f.informers {
 		informerType := informerType

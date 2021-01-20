@@ -18,6 +18,7 @@ package metadatainformer
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/diff"
 	"k8s.io/client-go/metadata/fake"
+	core "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -156,37 +158,69 @@ func TestMetadataSharedInformerFactory(t *testing.T) {
 	}
 }
 
-// TODO: Clean this up and add test to stop specific informer by modififying the fakeClient
-func TestStoppableMetadataSharedInformerFactory(t *testing.T) {
-	timeout := time.Duration(3 * time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	onListErrorFunc := func(error) bool {
-		return true
+// TestSpecificInformerStopOnListError tests that when an informer's
+// lister errors out, the informer itself will shut down when
+// stopOptions are set to stopOnListError and will not shut down when
+// stopOptions are NOT set to stopOnListError
+func TestSpecificInformerStopOnListError(t *testing.T) {
+	scenarios := []struct {
+		stopOnListError bool
+	}{
+		{
+			stopOnListError: true,
+		},
+		{
+			stopOnListError: false,
+		},
 	}
-	testObject := newPartialObjectMetadata("extensions/v1beta1", "Deployment", "ns-foo", "name-foo")
-	scheme := runtime.NewScheme()
-	metav1.AddMetaToScheme(scheme)
-	fakeClient := fake.NewSimpleMetadataClient(scheme, []runtime.Object{testObject}...)
-	target := NewSharedInformerFactoryWithOptions(fakeClient, 0, WithOnListError(onListErrorFunc))
 
-	gvr := schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"}
-	// retrieve the informer for the resource forces the factory to create the informer.
-	_ = target.ForResource(gvr)
-	infCtx, infCancel := context.WithCancel(ctx)
-	target.Start(infCtx.Done())
-	doneChannel, ok := target.DoneChannelFor(gvr)
-	if !ok {
-		t.Errorf("Unable to retrieve done channel for gvr")
-	}
-	go infCancel()
+	for _, ts := range scenarios {
+		timeout := time.Duration(3 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		stopOnListErrorFunc := func(error) bool {
+			return ts.stopOnListError
+		}
+		//testObject := newUnstructured("extensions/v1beta1", "Deployment", "ns-foo", "name-foo")
+		//gvrToListKind := map[schema.GroupVersionResource]string{
+		//	{Group: "extensions", Version: "v1beta1", Resource: "deployments"}: "DeploymentList",
+		//}
+		//fakeClient := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), gvrToListKind, []runtime.Object{testObject}...)
+		testObject := newPartialObjectMetadata("extensions/v1beta1", "Deployment", "ns-foo", "name-foo")
+		scheme := runtime.NewScheme()
+		metav1.AddMetaToScheme(scheme)
+		fakeClient := fake.NewSimpleMetadataClient(scheme, []runtime.Object{testObject}...)
+		gvr := schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"}
+		listReactor := func(a core.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("forced list error")
+		}
+		fakeClient.PrependReactor("*", "*", listReactor)
+		//target := dynamicinformer.NewDynamicSharedInformerFactoryWithOptions(fakeClient, 0, dynamicinformer.WithStopOnListError(stopOnListErrorFunc))
+		target := NewSharedInformerFactoryWithOptions(fakeClient, 0, WithStopOnListError(stopOnListErrorFunc))
 
-	select {
-	case <-doneChannel:
-		break
-	case <-ctx.Done():
-		t.Errorf("informer has not stopped itself, waited %v", timeout)
-		break
+		// retrieve the informer for the resource forces the factory to create the informer.
+		_ = target.ForResource(gvr)
+		infCtx, _ := context.WithCancel(ctx)
+		target.Start(infCtx.Done())
+		_, doneChannel, ok := target.ForExistingStoppableResource(gvr)
+		if !ok {
+			t.Errorf("Unable to retrieve done channel for gvr")
+		}
+
+		select {
+		case <-doneChannel:
+			if !ts.stopOnListError {
+				t.Errorf("informer should NOT have stopped when stopOnListError is false")
+			}
+			break
+		// timer must be shorter than the timeout or else it will close doneChannel
+		// and the select statement will race.
+		case <-time.NewTimer(2 * time.Second).C:
+			if ts.stopOnListError {
+				t.Errorf("informer SHOULD have stopped itself when stopOnListError is true, waited 2s")
+			}
+			break
+		}
 	}
 }
 
