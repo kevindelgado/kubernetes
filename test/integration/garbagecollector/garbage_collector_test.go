@@ -244,7 +244,7 @@ func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, work
 	}
 	onListError := func(error) bool { return true }
 	sharedInformers := informers.NewSharedInformerFactory(clientSet, 0)
-	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, 0, metadatainformer.WithOnListError(onListError))
+	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, 0, metadatainformer.WithStopOnListError(onListError))
 	alwaysStarted := make(chan struct{})
 	close(alwaysStarted)
 	gc, err := garbagecollector.NewGarbageCollector(

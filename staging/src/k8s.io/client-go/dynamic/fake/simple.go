@@ -18,7 +18,6 @@ package fake
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -104,27 +103,21 @@ func NewSimpleDynamicClientWithCustomListKinds(scheme *runtime.Scheme, gvrToList
 // you want to test easier.
 type FakeDynamicClient struct {
 	testing.Fake
-	scheme         *runtime.Scheme
-	gvrToListKind  map[schema.GroupVersionResource]string
-	forceListError bool
+	scheme        *runtime.Scheme
+	gvrToListKind map[schema.GroupVersionResource]string
 }
 
 type dynamicResourceClient struct {
-	client         *FakeDynamicClient
-	namespace      string
-	resource       schema.GroupVersionResource
-	listKind       string
-	forceListError bool
+	client    *FakeDynamicClient
+	namespace string
+	resource  schema.GroupVersionResource
+	listKind  string
 }
 
 var _ dynamic.Interface = &FakeDynamicClient{}
 
-func (c *FakeDynamicClient) ForceListError() {
-	c.forceListError = true
-}
-
 func (c *FakeDynamicClient) Resource(resource schema.GroupVersionResource) dynamic.NamespaceableResourceInterface {
-	return &dynamicResourceClient{client: c, resource: resource, listKind: c.gvrToListKind[resource], forceListError: c.forceListError}
+	return &dynamicResourceClient{client: c, resource: resource, listKind: c.gvrToListKind[resource]}
 }
 
 func (c *dynamicResourceClient) Namespace(ns string) dynamic.ResourceInterface {
@@ -320,9 +313,7 @@ func (c *dynamicResourceClient) Get(ctx context.Context, name string, opts metav
 }
 
 func (c *dynamicResourceClient) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
-	if c.forceListError {
-		return nil, errors.New("forced list error")
-	}
+	//return nil, fmt.Errorf("hack error")
 	if len(c.listKind) == 0 {
 		panic(fmt.Sprintf("coding error: you must register resource to list kind for every resource you're going to LIST when creating the client.  See NewSimpleDynamicClientWithCustomListKinds or register the list into the scheme: %v out of %v", c.resource, c.client.gvrToListKind))
 	}

@@ -257,7 +257,7 @@ func (gb *GraphBuilder) startMonitors() {
 	monitors := gb.monitors
 	for gvr := range monitors {
 		// TODO(kdelga): Should we only be doing this when ok?
-		if doneCh, ok := gb.sharedInformers.DoneChannelFor(gvr); ok {
+		if _, doneCh, ok := gb.sharedInformers.ForExistingStoppableResource(gvr); ok {
 			go func() {
 				<-doneCh
 				// push to set of recently stopped resources.

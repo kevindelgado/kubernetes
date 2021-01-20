@@ -25,7 +25,7 @@ import (
 
 // InformerFactory creates informers for each group version resource.
 type InformerFactory interface {
-	DoneChannelFor(resource schema.GroupVersionResource) (cache.DoneChannel, bool)
+	ForExistingStoppableResource(resource schema.GroupVersionResource) (informers.GenericInformer, cache.DoneChannel, bool)
 	ForResource(resource schema.GroupVersionResource) (informers.GenericInformer, error)
 	Start(stopCh <-chan struct{})
 }
@@ -35,12 +35,12 @@ type informerFactory struct {
 	metadataInformerFactory metadatainformer.SharedInformerFactory
 }
 
-func (i *informerFactory) DoneChannelFor(resource schema.GroupVersionResource) (cache.DoneChannel, bool) {
-	doneChannel, ok := i.typedInformerFactory.DoneChannelFor(resource)
+func (i *informerFactory) ForExistingStoppableResource(resource schema.GroupVersionResource) (informers.GenericInformer, cache.DoneChannel, bool) {
+	informers, doneChannel, ok := i.typedInformerFactory.ForExistingStoppableResource(resource)
 	if !ok {
-		return i.metadataInformerFactory.DoneChannelFor(resource)
+		return i.metadataInformerFactory.ForExistingStoppableResource(resource)
 	}
-	return doneChannel, ok
+	return informers, doneChannel, ok
 }
 
 func (i *informerFactory) ForResource(resource schema.GroupVersionResource) (informers.GenericInformer, error) {
