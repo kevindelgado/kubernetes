@@ -300,14 +300,12 @@ func TestSpecificInformerStopOnListError(t *testing.T) {
 			if !ts.stopOnListError {
 				t.Errorf("informer should NOT have stopped when stopOnListError is false")
 			}
-			break
 		// timer must be shorter than the timeout or else it will close doneChannel
 		// and the select statement will race.
 		case <-time.NewTimer(2 * time.Second).C:
 			if ts.stopOnListError {
 				t.Errorf("informer SHOULD have stopped itself when stopOnListError is true, waited 2s")
 			}
-			break
 		}
 	}
 }
