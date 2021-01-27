@@ -141,7 +141,8 @@ type GenericAPIServer struct {
 	// It is set during PrepareRun.
 	StaticOpenAPISpec *spec.Swagger
 
-	TypeConverter fieldmanager.TypeConverter
+	TypeConverter     fieldmanager.TypeConverter
+	OpenAPIModelsHack openapiproto.Models
 
 	// PostStartHooks are each called after the server has started listening, in a separate go func for each
 	// with no guarantee of ordering between them.  The map key is a name used for error reporting.
@@ -419,6 +420,13 @@ func (s *GenericAPIServer) InstallTypeConverter(apiPrefix string, openAPIConfig 
 	if err != nil {
 		return err
 	}
+	if openAPIModels != nil {
+		klog.Warningf("InstallTypeConverter openAPIModels len %d", len(openAPIModels.ListModels()))
+		s.OpenAPIModelsHack = openAPIModels
+	} else {
+		klog.Warningf("openAPIModels NILLLL")
+	}
+
 	typeConverter, err := fieldmanager.NewTypeConverter(openAPIModels, false)
 	if err != nil {
 		return err
@@ -453,6 +461,10 @@ func (s *GenericAPIServer) installAPIResources(apiPrefix string, apiGroupInfo *A
 
 		if openAPIModels == nil {
 			klog.Warningf("openAPIModels nil for %v", groupVersion)
+			if s.OpenAPIModelsHack != nil {
+				klog.Warningf("but OAN hack is len %d", len(s.OpenAPIModelsHack.ListModels()))
+			}
+			openAPIModels = s.OpenAPIModelsHack
 		} else {
 			klog.Warningf("openAPIModels NOTNIL for %v, len: %d", groupVersion, len(openAPIModels.ListModels()))
 		}
