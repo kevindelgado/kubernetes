@@ -604,6 +604,8 @@ func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storag
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create field manager: %v", err)
 		}
+	} else {
+		fmt.Printf("a.groupOpenAPIModels is %v", a.group.OpenAPIModels)
 	}
 	for _, action := range actions {
 		producedObject := storageMeta.ProducesObject(action.Verb)

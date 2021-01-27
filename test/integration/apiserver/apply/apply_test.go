@@ -86,46 +86,71 @@ func TestApplyAlsoCreates(t *testing.T) {
 			resource: "pods",
 			name:     "test-pod",
 			body: `{
-				"apiVersion": "v1",
-				"kind": "Pod",
-				"metadata": {
-					"name": "test-pod"
-				},
-				"spec": {
-					"containers": [{
-						"name":  "test-container",
-						"image": "test-image"
-					}]
-				}
-			}`,
+							"apiVersion": "v1",
+							"kind": "Pod",
+							"metadata": {
+								"name": "test-pod"
+							},
+							"spec": {
+								"containers": [{
+									"name":  "test-container",
+									"image": "test-image"
+								}]
+							}
+						}`,
 		}, {
 			resource: "services",
 			name:     "test-svc",
 			body: `{
-				"apiVersion": "v1",
-				"kind": "Service",
-				"metadata": {
-					"name": "test-svc"
-				},
-				"spec": {
-					"ports": [{
-						"port": 8080,
-						"protocol": "UDP"
-					}]
-				}
-			}`,
+							"apiVersion": "v1",
+							"kind": "Service",
+							"metadata": {
+								"name": "test-svc"
+							},
+							"spec": {
+								"ports": [{
+									"port": 8080,
+									"protocol": "UDP"
+								}]
+							}
+						}`,
+			//}, {
+			//	resource: "apiservices",
+			//	name:     "test-apiservice",
+			//	body: `{
+			//			apiVersion": "apiregistration.k8s.io/v1",
+			//			kind": "APIService",
+			//			metadata": {
+			//				"name": "v1.test"
+			//			},
+			//			spec": {
+			//			        "groupPriorityMinimum": 17000,
+			//				"group": "test",
+			//				"service": null,
+			//				"version": "v1",
+			//				"versionPriority": 15
+			//			}
+			//		}`,
 		},
 	}
 
 	for _, tc := range testCases {
-		_, err := client.CoreV1().RESTClient().Patch(types.ApplyPatchType).
+		//_, err := client.CoreV1().RESTClient().Patch(types.ApplyPatchType).
+		//	Namespace("default").
+		//	Resource(tc.resource).
+		//	Name(tc.name).
+		//	Param("fieldManager", "apply_test").
+		//	Body([]byte(tc.body)).
+		//	Do(context.TODO()).
+		//	Get()
+		res := client.CoreV1().RESTClient().Patch(types.ApplyPatchType).
 			Namespace("default").
 			Resource(tc.resource).
 			Name(tc.name).
 			Param("fieldManager", "apply_test").
 			Body([]byte(tc.body)).
-			Do(context.TODO()).
-			Get()
+			Do(context.TODO())
+		_, err := res.Get()
 		if err != nil {
 			t.Fatalf("Failed to create object using Apply patch: %v", err)
 		}

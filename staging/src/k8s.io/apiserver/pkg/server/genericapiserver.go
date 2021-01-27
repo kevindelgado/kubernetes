@@ -141,6 +141,8 @@ type GenericAPIServer struct {
 	// It is set during PrepareRun.
 	StaticOpenAPISpec *spec.Swagger
 
+	TypeConverter fieldmanager.TypeConverter
+
 	// PostStartHooks are each called after the server has started listening, in a separate go func for each
 	// with no guarantee of ordering between them.  The map key is a name used for error reporting.
 	// It may kill the process with a panic if it wishes to by returning an error.
@@ -411,7 +413,30 @@ func (s preparedGenericAPIServer) NonBlockingRun(stopCh <-chan struct{}) (<-chan
 	return stoppedCh, nil
 }
 
+func (s *GenericAPIServer) InstallTypeConverter(apiPrefix string, openAPIConfig *openapicommon.Config, apiGroupInfos ...*APIGroupInfo) error {
+	klog.Warningf("installing type converter with apiPrefix %s", apiPrefix)
+	openAPIModels, err := getOpenAPIModelsFromConfig(apiPrefix, openAPIConfig, apiGroupInfos...)
+	if err != nil {
+		return err
+	}
+	typeConverter, err := fieldmanager.NewTypeConverter(openAPIModels, false)
+	if err != nil {
+		return err
+	}
+	for _, gI := range apiGroupInfos {
+		for _, gV := range gI.PrioritizedVersions {
+			klog.Warningf("installing typeConverter and models for gv for %v", gV)
+			apiGV := s.getAPIGroupVersion(gI, gV, apiPrefix)
+			apiGV.OpenAPIModels = openAPIModels
+			apiGV.TypeConverter = typeConverter
+
+		}
+	}
+	return nil
+}
+
 // installAPIResources is a private method for installing the REST storage backing each api groupversionresource
+// TODO: Look at the history to see when/from where/why openAPIModels gets added here (it doesn't seem to be used for anything other than TypeConverter creation)
 func (s *GenericAPIServer) installAPIResources(apiPrefix string, apiGroupInfo *APIGroupInfo, openAPIModels openapiproto.Models) error {
 	var resourceInfos []*storageversion.ResourceInfo
 	for _, groupVersion := range apiGroupInfo.PrioritizedVersions {
@@ -424,15 +449,42 @@ func (s *GenericAPIServer) installAPIResources(apiPrefix string, apiGroupInfo *A
 		if apiGroupInfo.OptionsExternalVersion != nil {
 			apiGroupVersion.OptionsExternalVersion = apiGroupInfo.OptionsExternalVersion
 		}
-		apiGroupVersion.OpenAPIModels = openAPIModels
+		//apiGroupVersion.OpenAPIModels = openAPIModels
 
-		if openAPIModels != nil && utilfeature.DefaultFeatureGate.Enabled(features.ServerSideApply) {
-			typeConverter, err := fieldmanager.NewTypeConverter(openAPIModels, false)
-			if err != nil {
-				return err
-			}
-			apiGroupVersion.TypeConverter = typeConverter
+		if openAPIModels == nil {
+			klog.Warningf("openAPIModels nil for %v", groupVersion)
+		} else {
+			klog.Warningf("openAPIModels NOTNIL for %v, len: %d", groupVersion, len(openAPIModels.ListModels()))
 		}
+
+		if apiGroupVersion.OpenAPIModels == nil {
+			klog.Warningf("preset openAPModels nil for %v, setting now", groupVersion)
+			apiGroupVersion.OpenAPIModels = openAPIModels
+		} else {
+			klog.Warningf("preset openAPModels NOTNIL for %v, len: %d", groupVersion, len(apiGroupVersion.OpenAPIModels.ListModels()))
+		}
+
+		if utilfeature.DefaultFeatureGate.Enabled(features.ServerSideApply) {
+			if s.TypeConverter == nil && openAPIModels != nil {
+				typeConverter, err := fieldmanager.NewTypeConverter(openAPIModels, false)
+				if err != nil {
+					klog.Warningf("NewTypeConverterFailed")
+					return err
+				}
+				apiGroupVersion.TypeConverter = typeConverter
+			} else {
+				klog.Warningf("TypeConverter already set on the genericAPIServer")
+
+			}
+		}
+
+		//if openAPIModels != nil && utilfeature.DefaultFeatureGate.Enabled(features.ServerSideApply) {
+		//	typeConverter, err := fieldmanager.NewTypeConverter(openAPIModels, false)
+		//	if err != nil {
+		//		return err
+		//	}
+		//	apiGroupVersion.TypeConverter = typeConverter
+		//}
 
 		apiGroupVersion.MaxRequestBodyBytes = s.maxRequestBodyBytes
 
@@ -578,6 +630,32 @@ func NewDefaultAPIGroupInfo(group string, scheme *runtime.Scheme, parameterCodec
 		ParameterCodec:         parameterCodec,
 		NegotiatedSerializer:   codecs,
 	}
+}
+
+// getOpenAPIModels is a private method for getting the OpenAPI models
+func getOpenAPIModelsFromConfig(apiPrefix string, openAPIConfig *openapicommon.Config, apiGroupInfos ...*APIGroupInfo) (openapiproto.Models, error) {
+	if openAPIConfig == nil {
+		return nil, nil
+	}
+	pathsToIgnore := openapiutil.NewTrie(openAPIConfig.IgnorePrefixes)
+	resourceNames := make([]string, 0)
+	for _, apiGroupInfo := range apiGroupInfos {
+		groupResources, err := getResourceNamesForGroup(apiPrefix, apiGroupInfo, pathsToIgnore)
+		if err != nil {
+			return nil, err
+		}
+		resourceNames = append(resourceNames, groupResources...)
+	}
+
+	// Build the openapi definitions for those resources and convert it to proto models
+	openAPISpec, err := openapibuilder.BuildOpenAPIDefinitionsForResources(openAPIConfig, resourceNames...)
+	if err != nil {
+		return nil, err
+	}
+	for _, apiGroupInfo := range apiGroupInfos {
+		apiGroupInfo.StaticOpenAPISpec = openAPISpec
+	}
+	return utilopenapi.ToProtoModels(openAPISpec)
 }
 
 // getOpenAPIModels is a private method for getting the OpenAPI models

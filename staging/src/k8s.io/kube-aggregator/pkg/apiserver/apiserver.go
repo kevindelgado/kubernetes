@@ -197,6 +197,9 @@ func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.Deleg
 	}
 
 	apiGroupInfo := apiservicerest.NewRESTStorage(c.GenericConfig.MergedResourceConfig, c.GenericConfig.RESTOptionsGetter)
+	if err := s.GenericAPIServer.InstallTypeConverter("/apis", openAPIConfig, &apiGroupInfo); err != nil {
+		return nil, err
+	}
 	if err := s.GenericAPIServer.InstallAPIGroup(&apiGroupInfo); err != nil {
 		return nil, err
 	}
