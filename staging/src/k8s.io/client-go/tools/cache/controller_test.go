@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -466,7 +466,7 @@ func TestControllerRunWithStopOptions(t *testing.T) {
 		// confirm the controller stops running when it hits a list error
 		defer cancel()
 		controller.RunWithStopOptions(ctx, StopOptions{
-			OnListError: func(err error) bool {
+			StopOnListError: func(err error) bool {
 				return true
 			},
 		})

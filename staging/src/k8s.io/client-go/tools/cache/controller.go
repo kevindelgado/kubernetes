@@ -107,6 +107,7 @@ type Controller interface {
 
 	// Run is the legacy interface for running a controller that once called,
 	// can only be stopped by closing the stop channel.
+	// Deprecated: use RunWithStopOptions instead.
 	Run(stopCh <-chan struct{})
 
 	// HasSynced delegates to the Config's Queue
@@ -126,11 +127,13 @@ func New(c *Config) Controller {
 	return ctlr
 }
 
-// runSetup is a helper for the shared setup between
-// controller#Run and controller#RunWithStopOptions.
-func (c *controller) runSetup(stopCh <-chan struct{}) *Reflector {
+// RunWithStopOptions begins processing items, and will continue until stopOptions recognizes a stop condition.
+// RunWithStopOptions blocks, call via go.
+func (c *controller) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
+	defer utilruntime.HandleCrash()
+	refCtx, refCancel := context.WithCancel(ctx)
 	go func() {
-		<-stopCh
+		<-refCtx.Done()
 		c.config.Queue.Close()
 	}()
 	r := NewReflector(
@@ -149,20 +152,14 @@ func (c *controller) runSetup(stopCh <-chan struct{}) *Reflector {
 	c.reflectorMutex.Lock()
 	c.reflector = r
 	c.reflectorMutex.Unlock()
-	return r
-}
-
-// RunWithStopOptions begins processing items, and will continue until stopOptions recognizes a stop condition.
-// RunWithStopOptions blocks; call via go.
-func (c *controller) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
-	defer utilruntime.HandleCrash()
-	refCtx, refCancel := context.WithCancel(ctx)
-	r := c.runSetup(refCtx.Done())
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		// refCancel must be deferred in the goroutine that calls RunWithStopOptions
+		// on the reflector rather than in the main thread because it will never get cancelled
+		// because the processLoop waits on it to fire.
 		defer refCancel()
 		r.RunWithStopOptions(refCtx, stopOptions)
 	}()
@@ -173,16 +170,18 @@ func (c *controller) RunWithStopOptions(ctx context.Context, stopOptions StopOpt
 
 // Run supports calling RunWithStopOptions with just a stop channel
 // that when closed, is the only stop condition that will stop the controller.
-// TODO(kdelga): factor this and RunWithStopOptions out.
+// Deprecated: use RunWithStopOptions instead.
 func (c *controller) Run(stopCh <-chan struct{}) {
-	defer utilruntime.HandleCrash()
-	r := c.runSetup(stopCh)
+	ctx, cancel := context.WithCancel(context.TODO())
+	go func() {
+		select {
+		case <-stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 
-	var wg wait.Group
-	wg.StartWithChannel(stopCh, r.Run)
-
-	wait.Until(c.processLoop, time.Second, stopCh)
-	wg.Wait()
+	c.RunWithStopOptions(ctx, StopOptions{})
 }
 
 // Returns true once this controller has completed an initial resource listing

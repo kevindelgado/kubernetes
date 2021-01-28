@@ -220,7 +220,7 @@ func setupGC(t *testing.T, config *restclient.Config) garbageCollector {
 		t.Fatal(err)
 	}
 	stop := make(chan struct{})
-	go sharedInformers.StartWithStopOptions(stop)
+	go sharedInformers.Start(stop)
 	return garbageCollector{gc, stop}
 }
 

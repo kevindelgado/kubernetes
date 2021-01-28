@@ -106,6 +106,8 @@ func TestRunUntil(t *testing.T) {
 	}
 }
 
+// TestReflectorRunWithStopOptions tests that when the lister is forced to always error out
+// the reflector will stop when it's StopOnListError returns true.
 func TestReflectorRunWithStopOptions(t *testing.T) {
 	store := NewStore(MetaNamespaceKeyFunc)
 	r := NewReflector(&testLW{}, &v1.Pod{}, store, 0)
@@ -125,7 +127,7 @@ func TestReflectorRunWithStopOptions(t *testing.T) {
 		// confirm the reflector stops running when it hits a list error
 		defer cancel()
 		r.RunWithStopOptions(ctx, StopOptions{
-			OnListError: func(err error) bool {
+			StopOnListError: func(err error) bool {
 				return true
 			},
 		})

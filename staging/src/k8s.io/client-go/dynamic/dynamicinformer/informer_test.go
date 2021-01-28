@@ -263,12 +263,47 @@ func TestStoppableDynamicSharedInformerFactory(t *testing.T) {
 	// retrieve the informer for the resource forces the factory to create the informer.
 	_ = target.ForResource(gvr)
 	infCtx, infCancel := context.WithCancel(ctx)
-	target.StartWithStopOptions(infCtx.Done())
+	target.Start(infCtx.Done())
 	doneChannel, ok := target.DoneChannelFor(gvr)
 	if !ok {
 		t.Errorf("Unable to retrieve done channel for gvr")
 	}
 	go infCancel()
+
+	select {
+	case <-doneChannel:
+		break
+	case <-ctx.Done():
+		t.Errorf("informer has not stopped itself, waited %v", timeout)
+		break
+	}
+}
+
+// TODO: Get this working such that you're stopping the specific informer instead of the whole factory
+// TODO: Clean up fake dynamic client hacks.
+func TestSpecificInformerStopOnListError(t *testing.T) {
+	timeout := time.Duration(3 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	onListErrorFunc := func(error) bool {
+		// when this is true it passes, when false it does not
+		// This is expected.
+		return true
+	}
+	testObject := newUnstructured("extensions/v1beta1", "Deployment", "ns-foo", "name-foo")
+	fakeClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), []runtime.Object{testObject}...)
+	fakeClient.ForceListError()
+	target := dynamicinformer.NewDynamicSharedInformerFactoryWithOptions(fakeClient, 0, dynamicinformer.WithOnListError(onListErrorFunc))
+
+	gvr := schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"}
+	// retrieve the informer for the resource forces the factory to create the informer.
+	_ = target.ForResource(gvr)
+	infCtx, _ := context.WithCancel(ctx)
+	target.Start(infCtx.Done())
+	doneChannel, ok := target.DoneChannelFor(gvr)
+	if !ok {
+		t.Errorf("Unable to retrieve done channel for gvr")
+	}
 
 	select {
 	case <-doneChannel:

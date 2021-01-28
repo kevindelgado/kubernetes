@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/clock"
@@ -359,6 +359,10 @@ func TestSharedInformerErrorHandling(t *testing.T) {
 	close(stop)
 }
 
+// TestSharedInformerRunWithStopOptions runs an informer with StopOnListError
+// set to always return true. It tests that when the underlying reflector does reach a
+// list error (upon trying to add an object) that the informer stopps running before a
+// given timout.
 func TestSharedInformerRunWithStopOptions(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
@@ -371,7 +375,7 @@ func TestSharedInformerRunWithStopOptions(t *testing.T) {
 		// confirm the informer stops running when it hits a list error
 		defer cancel()
 		informer.RunWithStopOptions(ctx, StopOptions{
-			OnListError: func(err error) bool {
+			StopOnListError: func(err error) bool {
 				return true
 			},
 		})

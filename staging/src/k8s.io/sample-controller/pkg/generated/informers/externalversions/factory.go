@@ -165,14 +165,6 @@ func (f *sharedInformerFactory) InformerFor(obj runtime.Object, newFunc internal
 	return informer
 }
 
-// StartWithStoptions implements the controller-manager InformerFactory interface.
-// Because the sharedInformerFactory is used only with builtin types, there is no reason why StartWithStopOptions
-// should ever be used.
-// Dynamicinformer and metadatainformer factories actually implement StartWithStopOptions.
-func (f *sharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
-	f.Start(stopCh)
-}
-
 // DoneChannelFor returns the done channel indicating the when the resource's informer is stopped.
 // This exists to satisfy the InformerFactory interface, but because sharedInformerFactory is only
 // used with builtin types it is not expected to ever be called (because StartWithStopOptions is never used).
@@ -185,7 +177,6 @@ func (f *sharedInformerFactory) DoneChannelFor(resource schema.GroupVersionResou
 // API group versions.
 type SharedInformerFactory interface {
 	internalinterfaces.SharedInformerFactory
-	StartWithStopOptions(stopCh <-chan struct{})
 	DoneChannelFor(resource schema.GroupVersionResource) (cache.DoneChannel, bool)
 	ForResource(resource schema.GroupVersionResource) (GenericInformer, error)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
