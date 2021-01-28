@@ -82,9 +82,16 @@ type GraphBuilder struct {
 	// dependencyGraphBuilder
 	monitors    monitors
 	monitorLock sync.RWMutex
-	// stoppedResources is the set resources that have been stopped
-	// in between garbage collector syncs.
-	// They get removed from the set following the next gc Sync.
+	// stoppedResources is the set of resources whose informers
+	// have been stopped in between garbage collector syncs
+	// because the resource has been uninstalled from the cluster.
+	// They get removed from the set following the next gc Sync
+	// so that they can be restarted if/when the resource is reinstalled
+	// on the cluster. Tracking which resources are removed between
+	// syncs is necessary in order to pevent the situation where a resource
+	// is uninstalled and reinstalled between syncs causing the informer to
+	// shutdown without the GC recognizing the resource was uninstalled,
+	// and thus not restarting its informer.
 	stoppedResources     resourceSet
 	stoppedResourcesLock sync.RWMutex
 	// informersStarted is closed after after all of the controllers have been initialized and are running.
@@ -236,6 +243,18 @@ func (gb *GraphBuilder) syncMonitors(resources map[schema.GroupVersionResource]s
 	return utilerrors.NewAggregate(errs)
 }
 
+// addStoppedResource adds a specific gvr to the set of recently stopped resources
+// so that the next sync iteration knows to restart the informer
+// In the event that a sync occurs between when doneCh fires
+// and the stoppedResourcesLock is acquired the resources informer
+// will be restarted two syncs in row, the resource will wait until the following
+// sync to restart its informer.
+func (gb *GraphBuilder) addStoppedResource(gvr schema.GroupVersionResource) {
+	gb.stoppedResourcesLock.Lock()
+	defer gb.stoppedResourcesLock.Unlock()
+	gb.stoppedResources[gvr] = struct{}{}
+}
+
 // startMonitors ensures the current set of monitors are running. Any newly
 // started monitors will also cause shared informers to be started.
 //
@@ -254,16 +273,11 @@ func (gb *GraphBuilder) startMonitors() {
 	<-gb.informersStarted
 
 	gb.sharedInformers.Start(gb.stopCh)
-	monitors := gb.monitors
-	for gvr := range monitors {
-		// TODO(kdelga): Should we only be doing this when ok?
+	for gvr := range gb.monitors {
 		if _, doneCh, ok := gb.sharedInformers.ForExistingStoppableResource(gvr); ok {
 			go func() {
 				<-doneCh
-				// push to set of recently stopped resources.
-				gb.stoppedResourcesLock.Lock()
-				defer gb.stoppedResourcesLock.Unlock()
-				gb.stoppedResources[gvr] = struct{}{}
+				gb.addStoppedResource(gvr)
 			}()
 		}
 	}
