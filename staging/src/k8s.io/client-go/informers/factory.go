@@ -64,8 +64,6 @@ type sharedInformerFactory struct {
 	// startedInformers is used for tracking which informers have been started.
 	// This allows Start() to be called multiple times safely.
 	startedInformers map[reflect.Type]bool
-	// TODO: change startedInformers to map type to Done
-	stoppableInformers map[reflect.Type]cache.DoneChannel
 }
 
 // WithCustomResyncConfig sets a custom resync period for the specified informer types.
@@ -110,14 +108,12 @@ func NewFilteredSharedInformerFactory(client kubernetes.Interface, defaultResync
 // NewSharedInformerFactoryWithOptions constructs a new instance of a SharedInformerFactory with additional options.
 func NewSharedInformerFactoryWithOptions(client kubernetes.Interface, defaultResync time.Duration, options ...SharedInformerOption) SharedInformerFactory {
 	factory := &sharedInformerFactory{
-		client:        client,
-		namespace:     v1.NamespaceAll,
-		defaultResync: defaultResync,
-		informers:     make(map[reflect.Type]cache.SharedIndexInformer),
-		// TODO: find a way to unify the startedInformers set and stoppableInformers
-		startedInformers:   make(map[reflect.Type]bool),
-		stoppableInformers: make(map[reflect.Type]cache.DoneChannel),
-		customResync:       make(map[reflect.Type]time.Duration),
+		client:           client,
+		namespace:        v1.NamespaceAll,
+		defaultResync:    defaultResync,
+		informers:        make(map[reflect.Type]cache.SharedIndexInformer),
+		startedInformers: make(map[reflect.Type]bool),
+		customResync:     make(map[reflect.Type]time.Duration),
 	}
 
 	// Apply all options
@@ -199,7 +195,6 @@ func (f *sharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
 // used with builtin types it is not expected to ever be called (because StartWithStopOptions is never used).
 // Dynamicinformer and metadatainformer factories actually implement DoneChannelFor.
 func (f *sharedInformerFactory) DoneChannelFor(resource schema.GroupVersionResource) (cache.DoneChannel, bool) {
-	klog.Warningf("DoneChannelFor unsupported by sharedInformerFactory.")
 	return nil, false
 }
 
