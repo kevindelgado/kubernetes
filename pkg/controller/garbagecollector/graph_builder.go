@@ -253,7 +253,7 @@ func (gb *GraphBuilder) startMonitors() {
 	// that they don't get unexpected events on their work queues.
 	<-gb.informersStarted
 
-	gb.sharedInformers.StartWithStopOptions(gb.stopCh)
+	gb.sharedInformers.Start(gb.stopCh)
 	monitors := gb.monitors
 	for gvr := range monitors {
 		// TODO(kdelga): Should we only be doing this when ok?

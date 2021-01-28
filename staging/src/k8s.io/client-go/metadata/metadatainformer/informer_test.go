@@ -156,6 +156,7 @@ func TestMetadataSharedInformerFactory(t *testing.T) {
 	}
 }
 
+// TODO: Clean this up and add test to stop specific informer by modififying the fakeClient
 func TestStoppableMetadataSharedInformerFactory(t *testing.T) {
 	timeout := time.Duration(3 * time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -173,7 +174,7 @@ func TestStoppableMetadataSharedInformerFactory(t *testing.T) {
 	// retrieve the informer for the resource forces the factory to create the informer.
 	_ = target.ForResource(gvr)
 	infCtx, infCancel := context.WithCancel(ctx)
-	target.StartWithStopOptions(infCtx.Done())
+	target.Start(infCtx.Done())
 	doneChannel, ok := target.DoneChannelFor(gvr)
 	if !ok {
 		t.Errorf("Unable to retrieve done channel for gvr")

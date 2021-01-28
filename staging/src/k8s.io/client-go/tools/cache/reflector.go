@@ -217,32 +217,35 @@ var internalPackages = []string{"client-go/tools/cache/"}
 // RunWithStopOptions will exit when one of the stopOptions conditions is met.
 func (r *Reflector) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
 	klog.V(2).Infof("Starting reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
-	LWCtx, LWCancel := context.WithCancel(ctx)
+	lwCtx, lwCancel := context.WithCancel(ctx)
 	wait.BackoffUntil(func() {
-		if err := r.ListAndWatch(LWCtx.Done()); err != nil {
+		if err := r.ListAndWatch(lwCtx.Done()); err != nil {
 			r.watchErrorHandler(r, err)
-			onListErr := stopOptions.OnListError
 			// default to never stopping (same as previous behavior that only had stop channel)
-			if onListErr != nil {
-				if stopOptions.OnListError(err) {
+			if onListErr := stopOptions.StopOnListError; onListErr != nil {
+				if stopOptions.StopOnListError(err) {
 					klog.V(2).Infof("Closing with list err, type %s", r.expectedTypeName)
-					LWCancel()
+					lwCancel()
 				}
 			}
 		}
-	}, r.backoffManager, true, LWCtx.Done())
+	}, r.backoffManager, true, lwCtx.Done())
 	klog.V(2).Infof("Stopping reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
 }
 
 // Run calls RunWithStopOptions and only exits when stopCh is closed
+// Deprecated: Use RunWithStopOptions instead.
 func (r *Reflector) Run(stopCh <-chan struct{}) {
-	klog.V(2).Infof("Starting reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
-	wait.BackoffUntil(func() {
-		if err := r.ListAndWatch(stopCh); err != nil {
-			r.watchErrorHandler(r, err)
+	ctx, cancel := context.WithCancel(context.TODO())
+	go func() {
+		select {
+		case <-stopCh:
+			cancel()
+		case <-ctx.Done():
 		}
-	}, r.backoffManager, true, stopCh)
-	klog.V(2).Infof("Stopping reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
+	}()
+	r.RunWithStopOptions(ctx, StopOptions{})
+
 }
 
 var (

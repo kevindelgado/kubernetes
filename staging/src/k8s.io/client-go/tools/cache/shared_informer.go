@@ -155,13 +155,13 @@ type SharedInformer interface {
 	GetStore() Store
 	// GetController is deprecated, it does nothing useful
 	GetController() Controller
-	// Run supports the legacy way interface for running shared index informers by
-	// merging the provided stopCh with the internal stopRead on the informer
-	// and calling RunWithStopOptions.
-	Run(stopCh <-chan struct{})
 	// RunWithStopOptions starts and runs the shared informer, returning after it stops.
 	// The informer will be stopped when a stopOptions condition is met.
 	RunWithStopOptions(ctx context.Context, stopOptions StopOptions)
+	// Run supports the legacy way interface for running shared index informers
+	// with just a stop channel.
+	// Deprecated: use RunWithStopOptions instead.
+	Run(stopCh <-chan struct{})
 	// HasSynced returns true if the shared informer's store has been
 	// informed by at least one full LIST of the authoritative state
 	// of the informer's object collection.  This is unrelated to "resync".
@@ -190,16 +190,16 @@ type SharedInformer interface {
 // DoneChannel is a type alias for a channel that closes when an informer is stopped.
 type DoneChannel <-chan struct{}
 
-// OnListErrorFunc is a type alias for function that takes an error
-// and determines whether or not to stop.
-type OnListErrorFunc func(error) bool
+// StopOnListErrorFunc is a type alias for function that takes
+// an error from the reflector's List call and
+// and determines whether or not to stop the reflector (and corresponding controller and shared informer).
+type StopOnListErrorFunc func(error) bool
 
 // StopOptions let the caller specify which conditions to stop the informer.
-// TODO: Should we get rid of StopOptions (and just use OnListError) until we actually have more than one stop option?
 type StopOptions struct {
-	// OnListError inspects errors returned from the informer's underlying reflector,
+	// StopOnListError inspects errors returned from the underlying reflector's List call,
 	// and based on the error determines whether or not to stop the informer.
-	OnListError OnListErrorFunc
+	StopOnListError StopOnListErrorFunc
 }
 
 // SharedIndexInformer provides add and get Indexers ability based on SharedInformer.
@@ -388,9 +388,10 @@ func (s *sharedIndexInformer) SetWatchErrorHandler(handler WatchErrorHandler) er
 	return nil
 }
 
-// runSetup is a helper for the shared setup between
-// sharedIndexInformer#Run and sharedIndexInformer#RunWithStopOptions.
-func (s *sharedIndexInformer) runSetup() {
+func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
+	defer utilruntime.HandleCrash()
+	ctrlCtx, ctrlCancel := context.WithCancel(ctx)
+	defer ctrlCancel()
 	fifo := NewDeltaFIFOWithOptions(DeltaFIFOOptions{
 		KnownObjects:          s.indexer,
 		EmitDeltaTypeReplaced: true,
@@ -417,14 +418,6 @@ func (s *sharedIndexInformer) runSetup() {
 		s.started = true
 	}()
 
-}
-
-func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
-	defer utilruntime.HandleCrash()
-	ctrlCtx, ctrlCancel := context.WithCancel(ctx)
-	defer ctrlCancel()
-	s.runSetup()
-
 	// Separate stop channel because Processor should be stopped strictly after controller
 	processorStopCh := make(chan struct{})
 	var wg wait.Group
@@ -442,23 +435,16 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 }
 
 func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
-	defer utilruntime.HandleCrash()
-	s.runSetup()
-
-	// Separate stop channel because Processor should be stopped strictly after controller
-	processorStopCh := make(chan struct{})
-	var wg wait.Group
-	defer wg.Wait()              // Wait for Processor to stop
-	defer close(processorStopCh) // Tell Processor to stop
-	wg.StartWithChannel(processorStopCh, s.cacheMutationDetector.Run)
-	wg.StartWithChannel(processorStopCh, s.processor.run)
-
-	defer func() {
-		s.startedLock.Lock()
-		defer s.startedLock.Unlock()
-		s.stopped = true // Don't want any new listeners
+	ctx, cancel := context.WithCancel(context.TODO())
+	go func() {
+		select {
+		case <-stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
 	}()
-	s.controller.Run(stopCh)
+
+	s.RunWithStopOptions(ctx, StopOptions{})
 }
 
 func (s *sharedIndexInformer) HasSynced() bool {
