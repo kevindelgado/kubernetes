@@ -159,8 +159,7 @@ type SharedInformer interface {
 	// The informer will be stopped when a stopOptions condition is met.
 	RunWithStopOptions(ctx context.Context, stopOptions StopOptions)
 	// Run supports the legacy way interface for running shared index informers
-	// with just a stop channel.
-	// Deprecated: use RunWithStopOptions instead.
+	// with just a stop channel. Use RunWithStopOptions.
 	Run(stopCh <-chan struct{})
 	// HasSynced returns true if the shared informer's store has been
 	// informed by at least one full LIST of the authoritative state

@@ -234,7 +234,6 @@ func (r *Reflector) RunWithStopOptions(ctx context.Context, stopOptions StopOpti
 }
 
 // Run calls RunWithStopOptions and only exits when stopCh is closed
-// Deprecated: Use RunWithStopOptions instead.
 func (r *Reflector) Run(stopCh <-chan struct{}) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	go func() {

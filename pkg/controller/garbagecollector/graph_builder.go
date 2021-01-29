@@ -82,16 +82,19 @@ type GraphBuilder struct {
 	// dependencyGraphBuilder
 	monitors    monitors
 	monitorLock sync.RWMutex
-	// stoppedResources is the set of resources whose informers
-	// have been stopped in between garbage collector syncs
-	// because the resource has been uninstalled from the cluster.
-	// They get removed from the set following the next gc Sync
-	// so that they can be restarted if/when the resource is reinstalled
-	// on the cluster. Tracking which resources are removed between
-	// syncs is necessary in order to pevent the situation where a resource
-	// is uninstalled and reinstalled between syncs causing the informer to
-	// shutdown without the GC recognizing the resource was uninstalled,
-	// and thus not restarting its informer.
+	// stoppedResources is the set of resources that have been uninstalled
+	// from the cluster in between gc Syncs.
+	// When the resource is uninstalled the shared informer for the resource
+	// (as well as the underlying controller and reflector) are stopped.
+	// We need to track these resources because if they are reinstalled before
+	// the next Sync, the garbage collector will be unaware that the informer
+	// has been stopped and will not restart the informer.
+	// On the next gc Sync all resources in the stoppedResources set that have
+	// been reinstalledwill have their informer restarted and all resources
+	// will be removed from the set. Resources that have not been reinstalled
+	// have now been recognized as uninstalled by the GC and in the event that
+	// they are reinstalled on the cluster at a later time, will have their
+	// informers started by the first Sync call following their reinstallation.
 	stoppedResources     resourceSet
 	stoppedResourcesLock sync.RWMutex
 	// informersStarted is closed after after all of the controllers have been initialized and are running.
