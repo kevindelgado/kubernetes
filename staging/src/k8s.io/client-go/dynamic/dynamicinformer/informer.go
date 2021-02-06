@@ -109,7 +109,7 @@ func NewDynamicSharedInformerFactoryWithOptions(client dynamic.Interface, defaul
 	return factory
 }
 
-// ForStoppableResource returns the inform info (informer and done channel) for a given resource.
+// ForStoppableResource returns the informer info (informer and done channel) for a given resource.
 // If the informer does not exit yet and the method returns false,
 // ForResource must be called first in order to create the informer and add it to the factory's informers slice.
 // If the informer does exist, then the DoneChannel can be used to see when the specific informer has stopped.
