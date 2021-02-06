@@ -20,12 +20,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/metadata/metadatainformer"
-	"k8s.io/client-go/tools/cache"
 )
 
 // InformerFactory creates informers for each group version resource.
 type InformerFactory interface {
-	ForExistingStoppableResource(resource schema.GroupVersionResource) (informers.GenericInformer, cache.DoneChannel, bool)
+	ForStoppableResource(resource schema.GroupVersionResource) (*informers.StoppableInformerInfo, bool)
 	ForResource(resource schema.GroupVersionResource) (informers.GenericInformer, error)
 	Start(stopCh <-chan struct{})
 }
@@ -35,12 +34,12 @@ type informerFactory struct {
 	metadataInformerFactory metadatainformer.SharedInformerFactory
 }
 
-func (i *informerFactory) ForExistingStoppableResource(resource schema.GroupVersionResource) (informers.GenericInformer, cache.DoneChannel, bool) {
-	informers, doneChannel, ok := i.typedInformerFactory.ForExistingStoppableResource(resource)
+func (i *informerFactory) ForStoppableResource(resource schema.GroupVersionResource) (*informers.StoppableInformerInfo, bool) {
+	info, ok := i.typedInformerFactory.ForStoppableResource(resource)
 	if !ok {
-		return i.metadataInformerFactory.ForExistingStoppableResource(resource)
+		return i.metadataInformerFactory.ForStoppableResource(resource)
 	}
-	return informers, doneChannel, ok
+	return info, ok
 }
 
 func (i *informerFactory) ForResource(resource schema.GroupVersionResource) (informers.GenericInformer, error) {

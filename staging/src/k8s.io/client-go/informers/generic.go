@@ -76,6 +76,16 @@ type genericInformer struct {
 	resource schema.GroupResource
 }
 
+// StoppableInformerInfo contains an informer and a done channel
+// indicating when that informer has been stopped.
+type StoppableInformerInfo struct {
+	// Informer is the stoppable generic informer that has been
+	// stopped once Done has fired.
+	Informer GenericInformer
+	// Done is the channel indicating when the informer has stopped
+	Done cache.DoneChannel
+}
+
 // Informer returns the SharedIndexInformer.
 func (f *genericInformer) Informer() cache.SharedIndexInformer {
 	return f.informer

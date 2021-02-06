@@ -277,9 +277,9 @@ func (gb *GraphBuilder) startMonitors() {
 
 	gb.sharedInformers.Start(gb.stopCh)
 	for gvr := range gb.monitors {
-		if _, doneCh, ok := gb.sharedInformers.ForExistingStoppableResource(gvr); ok {
+		if info, ok := gb.sharedInformers.ForStoppableResource(gvr); ok {
 			go func() {
-				<-doneCh
+				<-info.Done
 				gb.addStoppedResource(gvr)
 			}()
 		}

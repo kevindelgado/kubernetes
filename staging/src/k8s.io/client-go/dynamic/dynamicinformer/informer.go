@@ -109,31 +109,28 @@ func NewDynamicSharedInformerFactoryWithOptions(client dynamic.Interface, defaul
 	return factory
 }
 
-//// DoneChannelFor returns the done channel indicating the when the resource's informer is stopped.
-//func (f *dynamicSharedInformerFactory) DoneChannelFor(gvr schema.GroupVersionResource) (cache.DoneChannel, bool) {
-//	f.lock.Lock()
-//	defer f.lock.Unlock()
-//
-//	doneCh, ok := f.stoppableInformers[gvr]
-//	return doneCh, ok
-//}
-
-// ForExistingStoppableResource returns the informer and DoneCHannel for a given resource.
-// If the informer returned is nil, ForResource must be called first in order to create the informer
-// and add it to the factory's informers slice.
-// If the informer does exist, than the DoneChannel can be used to see when the specific informer has stopped.
+// ForStoppableResource returns the inform info (informer and done channel) for a given resource.
+// If the informer does not exit yet and the method returns false,
+// ForResource must be called first in order to create the informer and add it to the factory's informers slice.
+// If the informer does exist, then the DoneChannel can be used to see when the specific informer has stopped.
 // The informer is returned alongside the DoneChannel to prevent races where a stopped informer is returned.
-func (f *dynamicSharedInformerFactory) ForExistingStoppableResource(gvr schema.GroupVersionResource) (informers.GenericInformer, cache.DoneChannel, bool) {
+func (f *dynamicSharedInformerFactory) ForStoppableResource(gvr schema.GroupVersionResource) (*informers.StoppableInformerInfo, bool) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
 	informer, exists := f.informers[gvr]
 	if !exists {
-		return nil, nil, false
+		return nil, false
 	}
 
 	doneCh, ok := f.stoppableInformers[gvr]
-	return informer, doneCh, ok
+	if !ok {
+		return nil, false
+	}
+	return &informers.StoppableInformerInfo{
+		Informer: informer,
+		Done:     doneCh,
+	}, ok
 }
 
 func (f *dynamicSharedInformerFactory) ForResource(gvr schema.GroupVersionResource) informers.GenericInformer {
