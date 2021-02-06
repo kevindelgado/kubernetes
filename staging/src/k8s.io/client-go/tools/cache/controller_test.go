@@ -450,6 +450,11 @@ func TestPanicPropagated(t *testing.T) {
 	}
 }
 
+// TestControllerRunWithStopOptions confirms that a controller stops itself
+// when the underlying reflector hits a list error by starting a controller
+// and in a separatre goroutine and waiting for the controller stops itself
+// before cancelling the context. If the context is stopped before the test
+// timeout, that means the controller stopped itself as expected.
 func TestControllerRunWithStopOptions(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})

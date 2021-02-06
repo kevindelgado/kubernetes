@@ -181,11 +181,6 @@ func TestSpecificInformerStopOnListError(t *testing.T) {
 		stopOnListErrorFunc := func(error) bool {
 			return ts.stopOnListError
 		}
-		//testObject := newUnstructured("extensions/v1beta1", "Deployment", "ns-foo", "name-foo")
-		//gvrToListKind := map[schema.GroupVersionResource]string{
-		//	{Group: "extensions", Version: "v1beta1", Resource: "deployments"}: "DeploymentList",
-		//}
-		//fakeClient := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), gvrToListKind, []runtime.Object{testObject}...)
 		testObject := newPartialObjectMetadata("extensions/v1beta1", "Deployment", "ns-foo", "name-foo")
 		scheme := runtime.NewScheme()
 		metav1.AddMetaToScheme(scheme)
@@ -195,7 +190,6 @@ func TestSpecificInformerStopOnListError(t *testing.T) {
 			return true, nil, errors.New("forced list error")
 		}
 		fakeClient.PrependReactor("*", "*", listReactor)
-		//target := dynamicinformer.NewDynamicSharedInformerFactoryWithOptions(fakeClient, 0, dynamicinformer.WithStopOnListError(stopOnListErrorFunc))
 		target := NewSharedInformerFactoryWithOptions(fakeClient, 0, WithStopOnListError(stopOnListErrorFunc))
 
 		// retrieve the informer for the resource forces the factory to create the informer.

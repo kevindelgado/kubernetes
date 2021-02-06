@@ -267,7 +267,6 @@ func TestSpecificInformerStopOnListError(t *testing.T) {
 	}
 
 	for _, ts := range scenarios {
-		//t.Run("name", func(t *testing.T) {
 		timeout := time.Duration(3 * time.Second)
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
