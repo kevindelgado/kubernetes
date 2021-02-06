@@ -165,19 +165,19 @@ func (f *sharedInformerFactory) InformerFor(obj runtime.Object, newFunc internal
 	return informer
 }
 
-// ForExistingStoppableResource returns the done channel indicating the when the resource's informer is stopped.
+// ForStoppableResource returns the done channel indicating the when the resource's informer is stopped.
 // This exists to satisfy the InformerFactory interface, but because sharedInformerFactory is only
 // used with builtin types it is not expected to ever be called (because StartWithStopOptions is never used).
 // Dynamicinformer and metadatainformer factories actually implement DoneChannelFor.
-func (f *sharedInformerFactory) ForExistingStoppableResource(resource schema.GroupVersionResource) (GenericInformer, cache.DoneChannel, bool) {
-	return nil, nil, false
+func (f *sharedInformerFactory) ForStoppableResource(resource schema.GroupVersionResource) (*StoppableInformerInfo, bool) {
+	return nil, false
 }
 
 // SharedInformerFactory provides shared informers for resources in all known
 // API group versions.
 type SharedInformerFactory interface {
 	internalinterfaces.SharedInformerFactory
-	ForExistingStoppableResource(resource schema.GroupVersionResource) (GenericInformer, cache.DoneChannel, bool)
+	ForStoppableResource(resource schema.GroupVersionResource) (*StoppableInformerInfo, bool)
 	ForResource(resource schema.GroupVersionResource) (GenericInformer, error)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
 

@@ -290,13 +290,13 @@ func TestSpecificInformerStopOnListError(t *testing.T) {
 		_ = target.ForResource(gvr)
 		infCtx, _ := context.WithCancel(ctx)
 		target.Start(infCtx.Done())
-		_, doneChannel, ok := target.ForExistingStoppableResource(gvr)
+		info, ok := target.ForStoppableResource(gvr)
 		if !ok {
 			t.Errorf("Unable to retrieve done channel for gvr")
 		}
 
 		select {
-		case <-doneChannel:
+		case <-info.Done:
 			if !ts.stopOnListError {
 				t.Errorf("informer should NOT have stopped when stopOnListError is false")
 			}
