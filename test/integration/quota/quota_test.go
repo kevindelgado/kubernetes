@@ -21,12 +21,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -35,16 +37,28 @@ import (
 	"k8s.io/apiserver/pkg/admission/plugin/resourcequota"
 	resourcequotaapi "k8s.io/apiserver/pkg/admission/plugin/resourcequota/apis/resourcequota"
 	"k8s.io/apiserver/pkg/quota/v1/generic"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/metadata"
+	"k8s.io/client-go/metadata/metadatainformer"
 	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/record"
 	watchtools "k8s.io/client-go/tools/watch"
+	"k8s.io/controller-manager/pkg/informerfactory"
 	"k8s.io/kubernetes/pkg/controller"
 	replicationcontroller "k8s.io/kubernetes/pkg/controller/replication"
 	resourcequotacontroller "k8s.io/kubernetes/pkg/controller/resourcequota"
 	quotainstall "k8s.io/kubernetes/pkg/quota/v1/install"
 	"k8s.io/kubernetes/test/integration/framework"
+
+	// GC copy-pasta
+	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	apiextensionstestserver "k8s.io/apiextensions-apiserver/test/integration/fixtures"
+	cacheddiscovery "k8s.io/client-go/discovery/cached/memory"
+	kubeapiservertesting "k8s.io/kubernetes/cmd/kube-apiserver/app/testing"
 )
 
 // 1.2 code gets:
@@ -62,7 +76,8 @@ func TestQuota(t *testing.T) {
 	}))
 
 	admissionCh := make(chan struct{})
-	clientset := clientset.NewForConfigOrDie(&restclient.Config{QPS: -1, Host: s.URL, ContentConfig: restclient.ContentConfig{GroupVersion: &schema.GroupVersion{Group: "", Version: "v1"}}})
+	clientConfig := &restclient.Config{QPS: -1, Host: s.URL, ContentConfig: restclient.ContentConfig{GroupVersion: &schema.GroupVersion{Group: "", Version: "v1"}}}
+	clientset := clientset.NewForConfigOrDie(clientConfig)
 	config := &resourcequotaapi.Configuration{}
 	admission, err := resourcequota.NewResourceQuota(config, 5, admissionCh)
 	if err != nil {
@@ -88,10 +103,14 @@ func TestQuota(t *testing.T) {
 	controllerCh := make(chan struct{})
 	defer close(controllerCh)
 
-	informers := informers.NewSharedInformerFactory(clientset, controller.NoResyncPeriodFunc())
+	//informers := informers.NewSharedInformerFactory(clientset, controller.NoResyncPeriodFunc())
+	metadataClient := metadata.NewForConfigOrDie(clientConfig)
+	stopOnListError := func(error) bool { return true }
+	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, controller.NoResyncPeriodFunc(), metadatainformer.WithStopOnListError(stopOnListError))
+	informers := informerfactory.NewInformerFactory(internalInformers, metadataInformers)
 	rm := replicationcontroller.NewReplicationManager(
-		informers.Core().V1().Pods(),
-		informers.Core().V1().ReplicationControllers(),
+		internalInformers.Core().V1().Pods(),
+		internalInformers.Core().V1().ReplicationControllers(),
 		clientset,
 		replicationcontroller.BurstReplicas,
 	)
@@ -104,7 +123,7 @@ func TestQuota(t *testing.T) {
 	informersStarted := make(chan struct{})
 	resourceQuotaControllerOptions := &resourcequotacontroller.ControllerOptions{
 		QuotaClient:               clientset.CoreV1(),
-		ResourceQuotaInformer:     informers.Core().V1().ResourceQuotas(),
+		ResourceQuotaInformer:     internalInformers.Core().V1().ResourceQuotas(),
 		ResyncPeriod:              controller.NoResyncPeriodFunc,
 		InformerFactory:           informers,
 		ReplenishmentResyncPeriod: controller.NoResyncPeriodFunc,
@@ -156,9 +175,11 @@ func waitForQuota(t *testing.T, quota *v1.ResourceQuota, clientset *clientset.Cl
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if _, err := clientset.CoreV1().ResourceQuotas(quota.Namespace).Create(context.TODO(), quota, metav1.CreateOptions{}); err != nil {
+	q, err := clientset.CoreV1().ResourceQuotas(quota.Namespace).Create(context.TODO(), quota, metav1.CreateOptions{})
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	t.Logf("created quota %v", q)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
@@ -370,4 +391,202 @@ func TestQuotaLimitedResourceDenial(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func TestCRDQuotaMaster(t *testing.T) {
+
+}
+
+func TestCRDQuota(t *testing.T) {
+	// Setup code from GC integration test
+	result := kubeapiservertesting.StartTestServerOrDie(t, nil, nil, framework.SharedEtcd())
+	clientSet, err := clientset.NewForConfig(result.ClientConfig)
+	if err != nil {
+		t.Fatalf("error creating clientset: %v", err)
+	}
+
+	// Helpful stuff for testing CRD.
+	apiExtensionClient, err := apiextensionsclientset.NewForConfig(result.ClientConfig)
+	if err != nil {
+		t.Fatalf("error creating extension clientset: %v", err)
+	}
+	// CreateNewCustomResourceDefinition wants to use this namespace for verifying
+	// namespace-scoped CRD creation.
+	createNamespaceOrDie("aval", clientSet, t)
+
+	discoveryClient := cacheddiscovery.NewMemCacheClient(clientSet.Discovery())
+	restMapper := restmapper.NewDeferredDiscoveryRESTMapper(discoveryClient)
+	restMapper.Reset()
+	config := *result.ClientConfig
+	metadataClient, err := metadata.NewForConfig(&config)
+	if err != nil {
+		t.Fatalf("failed to create metadataClient: %v", err)
+	}
+	dynamicClient, err := dynamic.NewForConfig(&config)
+	if err != nil {
+		t.Fatalf("failed to create dynamicClient: %v", err)
+	}
+	onListError := func(error) bool { return true }
+	sharedInformers := informers.NewSharedInformerFactory(clientSet, 0)
+	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, 0, metadatainformer.WithStopOnListError(onListError))
+	alwaysStarted := make(chan struct{})
+	close(alwaysStarted)
+
+	// controller creation
+	controllerCh := make(chan struct{})
+	defer close(controllerCh)
+	rm := replicationcontroller.NewReplicationManager(
+		sharedInformers.Core().V1().Pods(),
+		sharedInformers.Core().V1().ReplicationControllers(),
+		clientSet,
+		replicationcontroller.BurstReplicas,
+	)
+	rm.SetEventRecorder(&record.FakeRecorder{})
+	go rm.Run(3, controllerCh)
+
+	discoveryFunc := clientSet.Discovery().ServerPreferredNamespacedResources
+	listerFuncForResource := generic.ListerFuncForResourceFunc(sharedInformers.ForResource)
+	qc := quotainstall.NewQuotaConfigurationForControllers(listerFuncForResource)
+	informersStarted := make(chan struct{})
+	informers := informerfactory.NewInformerFactory(sharedInformers, metadataInformers)
+	resourceQuotaControllerOptions := &resourcequotacontroller.ControllerOptions{
+		QuotaClient:               clientSet.CoreV1(),
+		ResourceQuotaInformer:     sharedInformers.Core().V1().ResourceQuotas(),
+		ResyncPeriod:              controller.NoResyncPeriodFunc,
+		InformerFactory:           informers,
+		ReplenishmentResyncPeriod: controller.NoResyncPeriodFunc,
+		DiscoveryFunc:             discoveryFunc,
+		IgnoredResourcesFunc:      qc.IgnoredResources,
+		InformersStarted:          informersStarted,
+		Registry:                  generic.NewRegistry(qc.Evaluators()),
+	}
+	resourceQuotaController, err := resourcequotacontroller.NewController(resourceQuotaControllerOptions)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+
+	syncPeriod := 5 * time.Second
+	startRQ := func(workers int) {
+		go wait.Until(func() {
+			restMapper.Reset()
+		}, syncPeriod, controllerCh)
+		go resourceQuotaController.Run(1, controllerCh)
+		go resourceQuotaController.Sync(discoveryFunc, syncPeriod, controllerCh)
+	}
+	startRQ(5)
+	informers.Start(controllerCh)
+	close(informersStarted)
+	// install crd on cluster
+	//ns := createNamespaceOrDie("test-crd", clientSet, t)
+	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}}
+	definition, resourceClient := createRandomCustomResourceDefinition(t, apiExtensionClient, dynamicClient, ns.Name)
+	time.Sleep(6 * time.Second)
+
+	// create crd quota N
+	n := 3
+	//resourceString := fmt.Sprintf("%s/%s", definition.Spec.Group, definition.Spec.Names.Plural)
+
+	hard := v1.ResourceList{}
+	//resourceName := v1.ResourceName(v1.DefaultResourceRequestsPrefix + resourceString)
+	resourceName := v1.ResourceName(fmt.Sprintf("count/%s.%s", definition.Spec.Names.Plural, definition.Spec.Group))
+	hard[resourceName] = resource.MustParse(strconv.Itoa(n))
+	//hard[v1.ResourcePods] = resource.MustParse(strconv.Itoa(n))
+	quota := &v1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "quota",
+			Namespace: ns.Name,
+		},
+		Spec: v1.ResourceQuotaSpec{
+			Hard: hard,
+		},
+	}
+	waitForQuota(t, quota, clientSet)
+	//time.Sleep(30 * time.Second)
+	// create n+1 crd objects, confirm failure of the last one
+	for i := 1; i < n+1; i++ {
+		crd, err := resourceClient.Create(context.TODO(), newCRDInstance(definition, ns.Name, fmt.Sprintf("crd-%d", i)), metav1.CreateOptions{})
+		if err != nil {
+			if i != n+1 {
+				t.Fatalf("failed to create crd on iteration: %d, err: %v", i, err)
+			} else {
+				t.Logf("expected to fail to create crd on iteration: %d, err: %v", i, err)
+			}
+		} else {
+			t.Logf("created crd %q\n obj is %v", crd.GetName(), crd)
+			crds, crdsErr := resourceClient.List(context.TODO(), metav1.ListOptions{})
+			t.Logf("crds list is %v\n err is %v\n", crds, crdsErr)
+			err := wait.Poll(4*time.Second, time.Minute, func() (bool, error) {
+
+				q, err := clientSet.CoreV1().ResourceQuotas(ns.Name).Get(context.TODO(), "quota", metav1.GetOptions{})
+				t.Logf("q is %v\n err is %v", q, err)
+				t.Logf("hard is %v", q.Status.Hard)
+				t.Logf("used is %v", q.Status.Used)
+				if err != nil {
+					return false, err
+				}
+				used, ok := q.Status.Used[resourceName]
+				if ok && used.Sign() > 0 {
+					t.Logf("exists in used!!")
+					t.Logf("AGAIN used is %v", q.Status.Used)
+					return true, nil
+				}
+				return false, nil
+			})
+			if err != nil {
+				t.Fatalf("err %v", err)
+			}
+		}
+		time.Sleep(6 * time.Second)
+	}
+
+}
+func newCRDInstance(definition *apiextensionsv1beta1.CustomResourceDefinition, namespace, name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       definition.Spec.Names.Kind,
+			"apiVersion": definition.Spec.Group + "/" + definition.Spec.Version,
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+			},
+		},
+	}
+}
+
+func createRandomCustomResourceDefinition(
+	t *testing.T, apiExtensionClient apiextensionsclientset.Interface,
+	dynamicClient dynamic.Interface,
+	namespace string,
+) (*apiextensionsv1beta1.CustomResourceDefinition, dynamic.ResourceInterface) {
+	// Create a random custom resource definition and ensure it's available for
+	// use.
+	definition := apiextensionstestserver.NewRandomNameCustomResourceDefinition(apiextensionsv1beta1.NamespaceScoped)
+
+	definition, err := apiextensionstestserver.CreateNewCustomResourceDefinition(definition, apiExtensionClient, dynamicClient)
+	if err != nil {
+		t.Fatalf("failed to create CustomResourceDefinition: %v", err)
+	}
+
+	// Get a client for the custom resource.
+	gvr := schema.GroupVersionResource{Group: definition.Spec.Group, Version: definition.Spec.Version, Resource: definition.Spec.Names.Plural}
+
+	resourceClient := dynamicClient.Resource(gvr).Namespace(namespace)
+
+	return definition, resourceClient
+}
+
+func createNamespaceOrDie(name string, c clientset.Interface, t *testing.T) *v1.Namespace {
+	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	if _, err := c.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create namespace: %v", err)
+	}
+	falseVar := false
+	_, err := c.CoreV1().ServiceAccounts(ns.Name).Create(context.TODO(), &v1.ServiceAccount{
+		ObjectMeta:                   metav1.ObjectMeta{Name: "default"},
+		AutomountServiceAccountToken: &falseVar,
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create service account: %v", err)
+	}
+	return ns
 }
