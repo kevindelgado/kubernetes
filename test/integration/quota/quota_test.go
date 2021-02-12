@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -45,7 +44,6 @@ import (
 	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/metadata/metadatainformer"
 	restclient "k8s.io/client-go/rest"
-	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/record"
 	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/controller-manager/pkg/informerfactory"
@@ -54,12 +52,12 @@ import (
 	resourcequotacontroller "k8s.io/kubernetes/pkg/controller/resourcequota"
 	quotainstall "k8s.io/kubernetes/pkg/quota/v1/install"
 	"k8s.io/kubernetes/test/integration/framework"
+	"k8s.io/kubernetes/test/integration/util"
 
 	// GC copy-pasta
-	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apiextensionstestserver "k8s.io/apiextensions-apiserver/test/integration/fixtures"
-	cacheddiscovery "k8s.io/client-go/discovery/cached/memory"
 	kubeapiservertesting "k8s.io/kubernetes/cmd/kube-apiserver/app/testing"
 )
 
@@ -401,8 +399,8 @@ func TestCRDQuotaUninstallReinstall(t *testing.T) {
 	ctx := setup(t, 2)
 	defer ctx.tearDown()
 	// install crd on cluster
-	ns := createNamespaceOrDie("test-crd", ctx.clientSet, t)
-	definition, resourceClient := createRandomCustomResourceDefinition(t, ctx.apiExtensionClient, ctx.dynamicClient, ns.Name)
+	ns := util.CreateNamespaceOrDie("test-crd", ctx.clientSet, t)
+	definition, resourceClient := util.CreateRandomCustomResourceDefinition(t, ctx.apiExtensionClient, ctx.dynamicClient, ns.Name)
 	time.Sleep(ctx.syncPeriod)
 	n := 3
 	quotaName := "quota"
@@ -420,7 +418,7 @@ func TestCRDQuotaUninstallReinstall(t *testing.T) {
 	}
 	waitForQuota(t, quota, ctx.clientSet)
 	// create the crd instance
-	_, err := resourceClient.Create(context.TODO(), newCRDInstance(definition, ns.Name, fmt.Sprintf("crd-%d", 1)), metav1.CreateOptions{})
+	_, err := resourceClient.Create(context.TODO(), util.NewCRDInstance(definition, ns.Name, fmt.Sprintf("crd-%d", 1)), metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("failed to create crd instance 1, err: %v", err)
 	}
@@ -448,7 +446,7 @@ func TestCRDQuotaUninstallReinstall(t *testing.T) {
 	}
 
 	// create instance
-	_, err = resourceClient.Create(context.TODO(), newCRDInstance(definition, ns.Name, fmt.Sprintf("crd-%d", 2)), metav1.CreateOptions{})
+	_, err = resourceClient.Create(context.TODO(), util.NewCRDInstance(definition, ns.Name, fmt.Sprintf("crd-%d", 2)), metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("failed to create crd instance 2, err: %v", err)
 	}
@@ -465,8 +463,8 @@ func TestCRDQuota(t *testing.T) {
 	defer ctx.tearDown()
 
 	// install crd on cluster, give it time to sync
-	ns := createNamespaceOrDie("test-crd", ctx.clientSet, t)
-	definition, resourceClient := createRandomCustomResourceDefinition(t, ctx.apiExtensionClient, ctx.dynamicClient, ns.Name)
+	ns := util.CreateNamespaceOrDie("test-crd", ctx.clientSet, t)
+	definition, resourceClient := util.CreateRandomCustomResourceDefinition(t, ctx.apiExtensionClient, ctx.dynamicClient, ns.Name)
 	time.Sleep(ctx.syncPeriod)
 
 	// create crd quota N
@@ -488,7 +486,7 @@ func TestCRDQuota(t *testing.T) {
 	// create n+1 crd objects, confirm failure of the last one
 	for i := 1; i < n+1; i++ {
 		// create a new crd instance
-		_, err := resourceClient.Create(context.TODO(), newCRDInstance(definition, ns.Name, fmt.Sprintf("crd-%d", i)), metav1.CreateOptions{})
+		_, err := resourceClient.Create(context.TODO(), util.NewCRDInstance(definition, ns.Name, fmt.Sprintf("crd-%d", i)), metav1.CreateOptions{})
 		if err != nil {
 			if i != n+1 {
 				t.Fatalf("failed to create crd on iteration: %d, err: %v", i, err)
@@ -538,61 +536,27 @@ func setup(t *testing.T, workerCount int) *testContext {
 }
 
 func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, workerCount int) *testContext {
-	clientSet, err := clientset.NewForConfig(result.ClientConfig)
-	if err != nil {
-		t.Fatalf("error creating clientset: %v", err)
-	}
+	ctx := util.ExtensionSetup(t, result, workerCount)
 
-	// Helpful stuff for testing CRD.
-	apiExtensionClient, err := apiextensionsclientset.NewForConfig(result.ClientConfig)
-	if err != nil {
-		t.Fatalf("error creating extension clientset: %v", err)
-	}
-	// CreateNewCustomResourceDefinition wants to use this namespace for verifying
-	// namespace-scoped CRD creation.
-	createNamespaceOrDie("aval", clientSet, t)
+	// TODO: refactor with extensionSetup
 
-	discoveryClient := cacheddiscovery.NewMemCacheClient(clientSet.Discovery())
-	restMapper := restmapper.NewDeferredDiscoveryRESTMapper(discoveryClient)
-	restMapper.Reset()
-	config := *result.ClientConfig
-	metadataClient, err := metadata.NewForConfig(&config)
-	if err != nil {
-		t.Fatalf("failed to create metadataClient: %v", err)
-	}
-	dynamicClient, err := dynamic.NewForConfig(&config)
-	if err != nil {
-		t.Fatalf("failed to create dynamicClient: %v", err)
-	}
-	onListError := func(error) bool { return true }
-	sharedInformers := informers.NewSharedInformerFactory(clientSet, 0)
-	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, 0, metadatainformer.WithStopOnListError(onListError))
-	alwaysStarted := make(chan struct{})
-	close(alwaysStarted)
-
-	// controller creation
-	stopCh := make(chan struct{})
-	tearDown := func() {
-		close(stopCh)
-		result.TearDownFn()
-	}
 	rm := replicationcontroller.NewReplicationManager(
-		sharedInformers.Core().V1().Pods(),
-		sharedInformers.Core().V1().ReplicationControllers(),
-		clientSet,
+		ctx.SharedInformers.Core().V1().Pods(),
+		ctx.SharedInformers.Core().V1().ReplicationControllers(),
+		ctx.ClientSet,
 		replicationcontroller.BurstReplicas,
 	)
 	rm.SetEventRecorder(&record.FakeRecorder{})
-	go rm.Run(3, stopCh)
+	go rm.Run(3, ctx.StopCh)
 
-	discoveryFunc := clientSet.Discovery().ServerPreferredNamespacedResources
-	listerFuncForResource := generic.ListerFuncForResourceFunc(sharedInformers.ForResource)
+	discoveryFunc := ctx.ClientSet.Discovery().ServerPreferredNamespacedResources
+	listerFuncForResource := generic.ListerFuncForResourceFunc(ctx.SharedInformers.ForResource)
 	qc := quotainstall.NewQuotaConfigurationForControllers(listerFuncForResource)
 	informersStarted := make(chan struct{})
-	informers := informerfactory.NewInformerFactory(sharedInformers, metadataInformers)
+	informers := informerfactory.NewInformerFactory(ctx.SharedInformers, ctx.MetadataInformers)
 	resourceQuotaControllerOptions := &resourcequotacontroller.ControllerOptions{
-		QuotaClient:               clientSet.CoreV1(),
-		ResourceQuotaInformer:     sharedInformers.Core().V1().ResourceQuotas(),
+		QuotaClient:               ctx.ClientSet.CoreV1(),
+		ResourceQuotaInformer:     ctx.SharedInformers.Core().V1().ResourceQuotas(),
 		ResyncPeriod:              controller.NoResyncPeriodFunc,
 		InformerFactory:           informers,
 		ReplenishmentResyncPeriod: controller.NoResyncPeriodFunc,
@@ -609,76 +573,24 @@ func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, work
 	syncPeriod := 5 * time.Second
 	startRQ := func(workers int) {
 		go wait.Until(func() {
-			restMapper.Reset()
-		}, syncPeriod, stopCh)
-		go resourceQuotaController.Run(1, stopCh)
-		go resourceQuotaController.Sync(discoveryFunc, syncPeriod, stopCh)
+			ctx.RESTMapper.Reset()
+		}, syncPeriod, ctx.StopCh)
+		go resourceQuotaController.Run(1, ctx.StopCh)
+		go resourceQuotaController.Sync(discoveryFunc, syncPeriod, ctx.StopCh)
 	}
 	if workerCount > 0 {
 		startRQ(workerCount)
-		informers.Start(stopCh)
+		informers.Start(ctx.StopCh)
 		close(informersStarted)
 	}
-	ctx := &testContext{
-		tearDown:           tearDown,
+	return &testContext{
+		tearDown:           ctx.TearDown,
 		rq:                 resourceQuotaController,
-		clientSet:          clientSet,
-		apiExtensionClient: apiExtensionClient,
-		dynamicClient:      dynamicClient,
-		metadataClient:     metadataClient,
+		clientSet:          ctx.ClientSet,
+		apiExtensionClient: ctx.APIExtensionClient,
+		dynamicClient:      ctx.DynamicClient,
+		metadataClient:     ctx.MetadataClient,
 		startRQ:            startRQ,
 		syncPeriod:         syncPeriod,
 	}
-	return ctx
-}
-
-func newCRDInstance(definition *apiextensionsv1beta1.CustomResourceDefinition, namespace, name string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"kind":       definition.Spec.Names.Kind,
-			"apiVersion": definition.Spec.Group + "/" + definition.Spec.Version,
-			"metadata": map[string]interface{}{
-				"name":      name,
-				"namespace": namespace,
-			},
-		},
-	}
-}
-
-func createRandomCustomResourceDefinition(
-	t *testing.T, apiExtensionClient apiextensionsclientset.Interface,
-	dynamicClient dynamic.Interface,
-	namespace string,
-) (*apiextensionsv1beta1.CustomResourceDefinition, dynamic.ResourceInterface) {
-	// Create a random custom resource definition and ensure it's available for
-	// use.
-	definition := apiextensionstestserver.NewRandomNameCustomResourceDefinition(apiextensionsv1beta1.NamespaceScoped)
-
-	definition, err := apiextensionstestserver.CreateNewCustomResourceDefinition(definition, apiExtensionClient, dynamicClient)
-	if err != nil {
-		t.Fatalf("failed to create CustomResourceDefinition: %v", err)
-	}
-
-	// Get a client for the custom resource.
-	gvr := schema.GroupVersionResource{Group: definition.Spec.Group, Version: definition.Spec.Version, Resource: definition.Spec.Names.Plural}
-
-	resourceClient := dynamicClient.Resource(gvr).Namespace(namespace)
-
-	return definition, resourceClient
-}
-
-func createNamespaceOrDie(name string, c clientset.Interface, t *testing.T) *v1.Namespace {
-	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
-	if _, err := c.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{}); err != nil {
-		t.Fatalf("failed to create namespace: %v", err)
-	}
-	falseVar := false
-	_, err := c.CoreV1().ServiceAccounts(ns.Name).Create(context.TODO(), &v1.ServiceAccount{
-		ObjectMeta:                   metav1.ObjectMeta{Name: "default"},
-		AutomountServiceAccountToken: &falseVar,
-	}, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("failed to create service account: %v", err)
-	}
-	return ns
 }
