@@ -32,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	quota "k8s.io/apiserver/pkg/quota/v1"
 	"k8s.io/apiserver/pkg/quota/v1/generic"
-	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/controller-manager/pkg/informerfactory"
@@ -117,9 +116,9 @@ func NewMonitor(informersStarted <-chan struct{}, informerFactory informerfactor
 	}
 }
 
-type monitors map[schema.GroupVersionResource]informers.GenericInformer
+type monitors map[schema.GroupVersionResource]cache.SharedIndexInformer
 
-func (qm *QuotaMonitor) informerFor(resource schema.GroupVersionResource) (informers.GenericInformer, error) {
+func (qm *QuotaMonitor) informerFor(resource schema.GroupVersionResource) (cache.SharedIndexInformer, error) {
 	handlers := cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			// TODO: leaky abstraction!  live w/ it for now, but should pass down an update filter func.
@@ -158,11 +157,11 @@ func (qm *QuotaMonitor) informerFor(resource schema.GroupVersionResource) (infor
 			qm.resourceChanges.Add(event)
 		},
 	}
-	shared, err := qm.informerFactory.ForResource(resource)
+	generic, err := qm.informerFactory.ForResource(resource)
 	if err == nil {
 		klog.V(4).Infof("QuotaMonitor using a shared informer for resource %q", resource.String())
-		shared.Informer().AddEventHandlerWithResyncPeriod(handlers, qm.resyncPeriod())
-		return shared, nil
+		generic.Informer().AddEventHandlerWithResyncPeriod(handlers, qm.resyncPeriod())
+		return generic.Informer(), nil
 	}
 	klog.V(4).Infof("QuotaMonitor unable to use a shared informer for resource %q: %v", resource.String(), err)
 
@@ -269,7 +268,7 @@ func (qm *QuotaMonitor) IsSynced() bool {
 	}
 
 	for resource, monitor := range qm.monitors {
-		if !monitor.Informer().HasSynced() {
+		if !monitor.HasSynced() {
 
 			klog.V(4).Infof("quota monitor not synced: %v", resource)
 			return false
