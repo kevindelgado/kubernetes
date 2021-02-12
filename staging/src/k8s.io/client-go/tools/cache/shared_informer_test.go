@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -356,4 +357,50 @@ func TestSharedInformerErrorHandling(t *testing.T) {
 		t.Errorf("Timeout waiting for error handler call")
 	}
 	close(stop)
+}
+
+// TestSharedInformerRunWithStopOptions runs an informer with StopOnError
+// set to always return true. It tests that when the underlying reflector does reach a
+// list error (upon trying to add an object) that the informer stops running before a
+// given timout.
+func TestSharedInformerRunWithStopOptions(t *testing.T) {
+	// waitTime is how long to wait for the stopOnError=false case to pass.
+	// It needs to just be long enough for the underlying reflector to make
+	// its initial list call and error out.
+	waitTime := time.Second
+	table := []struct {
+		stopOnError bool
+	}{
+		{true},
+		{false},
+	}
+	for _, item := range table {
+		source := fcache.NewFakeControllerSource()
+		source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
+		source.ListError = fmt.Errorf("Access Denied")
+
+		informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			// confirm the informer stops running when it hits a list error
+			defer cancel()
+			informer.RunWithStopOptions(ctx, StopOptions{
+				StopOnError: func(err error) bool {
+					return item.stopOnError
+				},
+			})
+		}()
+
+		select {
+		case <-ctx.Done():
+			if !item.stopOnError {
+				t.Errorf("shared informer should NOT have stopped when stopOnError is false")
+			}
+		case <-time.After(waitTime):
+			if item.stopOnError {
+				t.Errorf("shared informer SHOULD have stopped itself when stopOnError is true, waited %s", waitTime.String())
+			}
+		}
+	}
 }
