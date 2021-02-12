@@ -117,6 +117,7 @@ func NewGarbageCollector(
 		absentOwnerCache: absentOwnerCache,
 		sharedInformers:  sharedInformers,
 		ignoredResources: ignoredResources,
+		stoppedResources: make(resourceSet),
 	}
 
 	return gc, nil
@@ -179,6 +180,11 @@ func (gc *GarbageCollector) Sync(discoveryClient discovery.ServerResourcesInterf
 		// Get the current resource list from discovery.
 		newResources := GetDeletableResources(discoveryClient)
 
+		// Filter resources that have been uninstalled and reinstalled on the cluster since the last sync.
+		// The following sync will recognize them as new resources and they will be restarted.
+		// If we do not filter them out, the informer that was previously stopped will not get restarted.
+		gc.dependencyGraphBuilder.filterStoppedResources(newResources)
+
 		// This can occur if there is an internal error in GetDeletableResources.
 		if len(newResources) == 0 {
 			klog.V(2).Infof("no resources reported by discovery, skipping garbage collector sync")
@@ -204,6 +210,7 @@ func (gc *GarbageCollector) Sync(discoveryClient discovery.ServerResourcesInterf
 			// On a reattempt, check if available resources have changed
 			if attempt > 1 {
 				newResources = GetDeletableResources(discoveryClient)
+				gc.dependencyGraphBuilder.filterStoppedResources(newResources)
 				if len(newResources) == 0 {
 					klog.V(2).Infof("no resources reported by discovery (attempt %d)", attempt)
 					return false, nil
