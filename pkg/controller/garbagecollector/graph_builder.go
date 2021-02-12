@@ -90,7 +90,7 @@ type GraphBuilder struct {
 	// the next Sync, the garbage collector will be unaware that the informer
 	// has been stopped and will not restart the informer.
 	// On the next gc Sync all resources in the stoppedResources set that have
-	// been reinstalledwill have their informer restarted and all resources
+	// been reinstalled will have their informer restarted and all resources
 	// will be removed from the set. Resources that have not been reinstalled
 	// have now been recognized as uninstalled by the GC and in the event that
 	// they are reinstalled on the cluster at a later time, will have their
