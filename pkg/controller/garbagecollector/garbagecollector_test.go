@@ -66,6 +66,8 @@ type testRESTMapper struct {
 	meta.RESTMapper
 }
 
+var stopOnError = func(error) bool { return true }
+
 func (*testRESTMapper) Reset() {}
 
 func TestGarbageCollectorConstruction(t *testing.T) {
@@ -87,7 +89,7 @@ func TestGarbageCollectorConstruction(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	sharedInformers := informers.NewSharedInformerFactory(client, 0)
-	metadataInformers := metadatainformer.NewSharedInformerFactory(metadataClient, 0)
+	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, 0, metadatainformer.WithStopOnError(stopOnError))
 	// No monitor will be constructed for the non-core resource, but the GC
 	// construction will not fail.
 	alwaysStarted := make(chan struct{})
@@ -210,7 +212,7 @@ func setupGC(t *testing.T, config *restclient.Config) garbageCollector {
 	}
 
 	client := fake.NewSimpleClientset()
-	sharedInformers := informers.NewSharedInformerFactory(client, 0)
+	sharedInformers := informers.NewSharedInformerFactoryWithOptions(client, 0)
 	alwaysStarted := make(chan struct{})
 	close(alwaysStarted)
 	gc, err := NewGarbageCollector(client, metadataClient, &testRESTMapper{testrestmapper.TestOnlyStaticRESTMapper(legacyscheme.Scheme)}, ignoredResources, sharedInformers, alwaysStarted)
@@ -843,7 +845,7 @@ func TestGarbageCollectorSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sharedInformers := informers.NewSharedInformerFactory(client, 0)
+	sharedInformers := informers.NewSharedInformerFactoryWithOptions(client, 0)
 	alwaysStarted := make(chan struct{})
 	close(alwaysStarted)
 	gc, err := NewGarbageCollector(client, metadataClient, rm, map[schema.GroupResource]struct{}{}, sharedInformers, alwaysStarted)
