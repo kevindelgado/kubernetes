@@ -436,6 +436,9 @@ func TestCRDQuotaUninstallReinstall(t *testing.T) {
 
 	// check quota used count is now 0 after deletion
 	err = pollExpectedQuota(ctx.clientSet, 0, resourceName, quotaName, ns.Name)
+	if err != nil {
+		t.Fatalf("failed to reset quota count after CRD deletion")
+	}
 
 	// reinstall the definition
 	accessor := meta.NewAccessor()

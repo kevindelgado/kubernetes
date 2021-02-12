@@ -9,8 +9,8 @@ go_library(
     name = "go_default_library",
     srcs = [
         "cloud.go",
-        "util.go",
         "extension.go",
+        "util.go",
     ],
     importpath = "k8s.io/kubernetes/test/integration/util",
     deps = [
