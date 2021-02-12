@@ -263,17 +263,15 @@ func (qm *QuotaMonitor) StartMonitors() {
 	// that they don't get unexpected events on their work queues.
 	<-qm.informersStarted
 
-	monitors := qm.monitors
-	started := 0
-	for _, monitor := range monitors {
-		if monitor.stopCh == nil {
-			monitor.stopCh = make(chan struct{})
-			qm.informerFactory.Start(qm.stopCh)
-			go monitor.Run()
-			started++
+	qm.informerFactory.Start(qm.stopCh)
+	for gvr := range qm.monitors {
+		if info, ok := qm.informerFactory.ForStoppableResource(gvr); ok {
+			go func() {
+				<-info.Done
+			}()
 		}
 	}
-	klog.V(4).Infof("QuotaMonitor started %d new monitors, %d currently running", started, len(monitors))
+	klog.Infof("QuotaMonitor started all %d monitors", len(qm.monitors))
 }
 
 // IsSynced returns true if any monitors exist AND all those monitors'
@@ -314,19 +312,6 @@ func (qm *QuotaMonitor) Run(stopCh <-chan struct{}) {
 	// closed.
 	qm.StartMonitors()
 	wait.Until(qm.runProcessResourceChanges, 1*time.Second, stopCh)
-
-	// Stop any running monitors.
-	qm.monitorLock.Lock()
-	defer qm.monitorLock.Unlock()
-	monitors := qm.monitors
-	stopped := 0
-	for _, monitor := range monitors {
-		if monitor.stopCh != nil {
-			stopped++
-			close(monitor.stopCh)
-		}
-	}
-	klog.Infof("QuotaMonitor stopped %d of %d monitors", stopped, len(monitors))
 }
 
 func (qm *QuotaMonitor) runProcessResourceChanges() {
