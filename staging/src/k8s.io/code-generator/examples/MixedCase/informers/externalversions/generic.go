@@ -38,6 +38,16 @@ type genericInformer struct {
 	resource schema.GroupResource
 }
 
+// StoppableInformerInfo contains an informer and a done channel
+// indicating when that informer has been stopped.
+type StoppableInformerInfo struct {
+	// Informer is the stoppable generic informer that has been
+	// stopped once Done has fired.
+	Informer GenericInformer
+	// Done is the channel indicating when the informer has stopped
+	Done cache.DoneChannel
+}
+
 // Informer returns the SharedIndexInformer.
 func (f *genericInformer) Informer() cache.SharedIndexInformer {
 	return f.informer
@@ -61,4 +71,14 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 	}
 
 	return nil, fmt.Errorf("no informer found for %v", resource)
+}
+
+// ForStoppableResource returns the informer info (informer and done channel)
+// indicating when the resource's informer is stopped.
+// This exists to satisfy the InformerFactory interface,  but because sharedInformerFactory
+// is only used with builtin types it is not expected to ever be called
+// (because StartWithStopOptions is never used as builtin resources are never uninstalled from the cluster).
+// Dynamicinformer and metadatainformer facotries actually implement ForStoppableResource.
+func (f *sharedInformerFactory) ForStoppableResource(gvr schema.GroupVersionResource) (*StoppableInformerInfo, bool) {
+	return nil, false
 }
