@@ -26,6 +26,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -39,6 +40,7 @@ import (
 	"k8s.io/apiserver/pkg/quota/v1/generic"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/metadata/metadatainformer"
@@ -393,12 +395,72 @@ func TestQuotaLimitedResourceDenial(t *testing.T) {
 	}
 }
 
-func TestQuotaCRDUninstallReinstall(t *testing.T) {
+// TestCRDQuotaUninstalledResources confirms that the quota controller continues to operate on CRDs that
+// are uninstalled and reinstalled on the cluster between quota controller syncs.
+func TestCRDQuotaUninstallReinstall(t *testing.T) {
 	ctx := setup(t, 2)
 	defer ctx.tearDown()
+	// install crd on cluster
+	ns := createNamespaceOrDie("test-crd", ctx.clientSet, t)
+	definition, resourceClient := createRandomCustomResourceDefinition(t, ctx.apiExtensionClient, ctx.dynamicClient, ns.Name)
+	time.Sleep(ctx.syncPeriod)
+	n := 3
+	quotaName := "quota"
+	hard := v1.ResourceList{}
+	resourceName := v1.ResourceName(fmt.Sprintf("count/%s.%s", definition.Spec.Names.Plural, definition.Spec.Group))
+	hard[resourceName] = resource.MustParse(strconv.Itoa(n))
+	quota := &v1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      quotaName,
+			Namespace: ns.Name,
+		},
+		Spec: v1.ResourceQuotaSpec{
+			Hard: hard,
+		},
+	}
+	waitForQuota(t, quota, ctx.clientSet)
+	// create the crd instance
+	_, err := resourceClient.Create(context.TODO(), newCRDInstance(definition, ns.Name, fmt.Sprintf("crd-%d", 1)), metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create crd instance 1, err: %v", err)
+	}
+
+	// confirm crd shows up in quota used count
+	err = pollExpectedQuota(ctx.clientSet, 1, resourceName, quotaName, ns.Name)
+	if err != nil {
+		t.Fatalf("err %v", err)
+	}
+
+	// delete the definition which should cascade to the instance and quota?
+	if err := apiextensionstestserver.DeleteCustomResourceDefinition(definition, ctx.apiExtensionClient); err != nil {
+		t.Fatalf("failed to delete %q: %v", definition.Name, err)
+	}
+
+	// check quota used count is now 0 after deletion
+	err = pollExpectedQuota(ctx.clientSet, 0, resourceName, quotaName, ns.Name)
+
+	// reinstall the definition
+	accessor := meta.NewAccessor()
+	accessor.SetResourceVersion(definition, "")
+	_, err = apiextensionstestserver.CreateNewCustomResourceDefinition(definition, ctx.apiExtensionClient, ctx.dynamicClient)
+	if err != nil {
+		t.Fatalf("failed to create CustomResourceDefinition on round 2: %v", err)
+	}
+
+	// create instance
+	_, err = resourceClient.Create(context.TODO(), newCRDInstance(definition, ns.Name, fmt.Sprintf("crd-%d", 2)), metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create crd instance 2, err: %v", err)
+	}
+
+	// confirm quota is updated with new instance in used count
+	err = pollExpectedQuota(ctx.clientSet, 1, resourceName, quotaName, ns.Name)
+	if err != nil {
+		t.Fatalf("err %v", err)
+	}
 }
 
-func TestQuotaCRD(t *testing.T) {
+func TestCRDQuota(t *testing.T) {
 	ctx := setup(t, 2)
 	defer ctx.tearDown()
 
@@ -434,22 +496,27 @@ func TestQuotaCRD(t *testing.T) {
 		} else {
 			// confirm that eventually, the resource quota used field
 			// equals the number of crd instances created
-			err := wait.Poll(time.Second, time.Minute, func() (bool, error) {
-				q, err := ctx.clientSet.CoreV1().ResourceQuotas(ns.Name).Get(context.TODO(), "quota", metav1.GetOptions{})
-				if err != nil {
-					return false, err
-				}
-				used, ok := q.Status.Used[resourceName]
-				if ok && used.AsDec().UnscaledBig().Int64() == int64(i) {
-					return true, nil
-				}
-				return false, nil
-			})
+			err := pollExpectedQuota(ctx.clientSet, i, resourceName, quotaName, ns.Name)
 			if err != nil {
 				t.Fatalf("err %v", err)
 			}
 		}
 	}
+
+}
+
+func pollExpectedQuota(clientSet kubernetes.Interface, target int, resourceName v1.ResourceName, quotaName, ns string) error {
+	return wait.Poll(time.Second, time.Minute, func() (bool, error) {
+		q, err := clientSet.CoreV1().ResourceQuotas(ns).Get(context.TODO(), quotaName, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		used, ok := q.Status.Used[resourceName]
+		if ok && used.AsDec().UnscaledBig().Int64() == int64(target) {
+			return true, nil
+		}
+		return false, nil
+	})
 
 }
 
