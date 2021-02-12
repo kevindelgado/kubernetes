@@ -169,7 +169,7 @@ func TestQuota(t *testing.T) {
 	t.Logf("Took %v to scale up with quota", endTime.Sub(startTime))
 }
 
-func waitForQuota(t *testing.T, quota *v1.ResourceQuota, clientset *clientset.Clientset) {
+func waitForQuota(t *testing.T, quota *v1.ResourceQuota, clientset clientset.Interface) {
 	w, err := clientset.CoreV1().ResourceQuotas(quota.Namespace).Watch(context.TODO(), metav1.SingleObject(metav1.ObjectMeta{Name: quota.Name}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -394,6 +394,10 @@ func TestQuotaLimitedResourceDenial(t *testing.T) {
 }
 
 func TestCRDQuota(t *testing.T) {
+	//ctx := setup(t, 2)
+	//defer ctx.tearDown()
+	workerCount := 2
+
 	// Setup code from GC integration test
 	result := kubeapiservertesting.StartTestServerOrDie(t, nil, nil, framework.SharedEtcd())
 	clientSet, err := clientset.NewForConfig(result.ClientConfig)
@@ -429,8 +433,11 @@ func TestCRDQuota(t *testing.T) {
 	close(alwaysStarted)
 
 	// controller creation
-	controllerCh := make(chan struct{})
-	defer close(controllerCh)
+	stopCh := make(chan struct{})
+	tearDown := func() {
+		close(stopCh)
+		result.TearDownFn()
+	}
 	rm := replicationcontroller.NewReplicationManager(
 		sharedInformers.Core().V1().Pods(),
 		sharedInformers.Core().V1().ReplicationControllers(),
@@ -438,7 +445,7 @@ func TestCRDQuota(t *testing.T) {
 		replicationcontroller.BurstReplicas,
 	)
 	rm.SetEventRecorder(&record.FakeRecorder{})
-	go rm.Run(3, controllerCh)
+	go rm.Run(3, stopCh)
 
 	discoveryFunc := clientSet.Discovery().ServerPreferredNamespacedResources
 	listerFuncForResource := generic.ListerFuncForResourceFunc(sharedInformers.ForResource)
@@ -465,17 +472,29 @@ func TestCRDQuota(t *testing.T) {
 	startRQ := func(workers int) {
 		go wait.Until(func() {
 			restMapper.Reset()
-		}, syncPeriod, controllerCh)
-		go resourceQuotaController.Run(1, controllerCh)
-		go resourceQuotaController.Sync(discoveryFunc, syncPeriod, controllerCh)
+		}, syncPeriod, stopCh)
+		go resourceQuotaController.Run(1, stopCh)
+		go resourceQuotaController.Sync(discoveryFunc, syncPeriod, stopCh)
 	}
-	startRQ(5)
-	informers.Start(controllerCh)
-	close(informersStarted)
+	if workerCount > 0 {
+		startRQ(workerCount)
+		informers.Start(stopCh)
+		close(informersStarted)
+	}
+	ctx := &testContext{
+		tearDown:           tearDown,
+		rq:                 resourceQuotaController,
+		clientSet:          clientSet,
+		apiExtensionClient: apiExtensionClient,
+		dynamicClient:      dynamicClient,
+		metadataClient:     metadataClient,
+		startRQ:            startRQ,
+		syncPeriod:         syncPeriod,
+	}
 	// install crd on cluster
 	//ns := createNamespaceOrDie("test-crd", clientSet, t)
 	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}}
-	definition, resourceClient := createRandomCustomResourceDefinition(t, apiExtensionClient, dynamicClient, ns.Name)
+	definition, resourceClient := createRandomCustomResourceDefinition(t, ctx.apiExtensionClient, ctx.dynamicClient, ns.Name)
 	time.Sleep(6 * time.Second)
 
 	// create crd quota N
@@ -496,7 +515,7 @@ func TestCRDQuota(t *testing.T) {
 			Hard: hard,
 		},
 	}
-	waitForQuota(t, quota, clientSet)
+	waitForQuota(t, quota, ctx.clientSet)
 	//time.Sleep(30 * time.Second)
 	// create n+1 crd objects, confirm failure of the last one
 	for i := 1; i < n+1; i++ {
@@ -536,6 +555,105 @@ func TestCRDQuota(t *testing.T) {
 	}
 
 }
+
+type testContext struct {
+	tearDown func()
+	//gc                 *garbagecollector.GarbageCollector
+	rq                 *resourcequotacontroller.Controller
+	clientSet          clientset.Interface
+	apiExtensionClient apiextensionsclientset.Interface
+	dynamicClient      dynamic.Interface
+	metadataClient     metadata.Interface
+	startRQ            func(workers int)
+	// syncPeriod is how often the GC started with startGC will be resynced.
+	syncPeriod time.Duration
+}
+
+// if workerCount > 0, will start the GC, otherwise it's up to the caller to Run() the GC.
+func setup(t *testing.T, workerCount int) *testContext {
+	return setupWithServer(t, kubeapiservertesting.StartTestServerOrDie(t, nil, nil, framework.SharedEtcd()), workerCount)
+}
+
+func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, workerCount int) *testContext {
+	return nil
+	//clientSet, err := clientset.NewForConfig(result.ClientConfig)
+	//if err != nil {
+	//	t.Fatalf("error creating clientset: %v", err)
+	//}
+
+	//// Helpful stuff for testing CRD.
+	//apiExtensionClient, err := apiextensionsclientset.NewForConfig(result.ClientConfig)
+	//if err != nil {
+	//	t.Fatalf("error creating extension clientset: %v", err)
+	//}
+	//// CreateNewCustomResourceDefinition wants to use this namespace for verifying
+	//// namespace-scoped CRD creation.
+	//createNamespaceOrDie("aval", clientSet, t)
+
+	//discoveryClient := cacheddiscovery.NewMemCacheClient(clientSet.Discovery())
+	//restMapper := restmapper.NewDeferredDiscoveryRESTMapper(discoveryClient)
+	//restMapper.Reset()
+	//config := *result.ClientConfig
+	//metadataClient, err := metadata.NewForConfig(&config)
+	//if err != nil {
+	//	t.Fatalf("failed to create metadataClient: %v", err)
+	//}
+	//dynamicClient, err := dynamic.NewForConfig(&config)
+	//if err != nil {
+	//	t.Fatalf("failed to create dynamicClient: %v", err)
+	//}
+	//onListError := func(error) bool { return true }
+	//sharedInformers := informers.NewSharedInformerFactory(clientSet, 0)
+	//metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, 0, metadatainformer.WithStopOnListError(onListError))
+	//alwaysStarted := make(chan struct{})
+	//close(alwaysStarted)
+
+	//// controller creation
+	//stopCh := make(chan struct{})
+	//tearDown := func() {
+	//	close(stopCh)
+	//	result.TearDownFn()
+	//}
+	//gc, err := garbagecollector.NewGarbageCollector(
+	//	clientSet,
+	//	metadataClient,
+	//	restMapper,
+	//	garbagecollector.DefaultIgnoredResources(),
+	//	informerfactory.NewInformerFactory(sharedInformers, metadataInformers),
+	//	alwaysStarted,
+	//)
+	//if err != nil {
+	//	t.Fatalf("failed to create garbage collector: %v", err)
+	//}
+
+	//syncPeriod := 5 * time.Second
+	//startGC := func(workers int) {
+	//	go wait.Until(func() {
+	//		// Resetting the REST mapper will also invalidate the underlying discovery
+	//		// client. This is a leaky abstraction and assumes behavior about the REST
+	//		// mapper, but we'll deal with it for now.
+	//		restMapper.Reset()
+	//	}, syncPeriod, stopCh)
+	//	go gc.Run(workers, stopCh)
+	//	go gc.Sync(clientSet.Discovery(), syncPeriod, stopCh)
+	//}
+
+	//if workerCount > 0 {
+	//	startGC(workerCount)
+	//}
+
+	//return &testContext{
+	//	tearDown:           tearDown,
+	//	gc:                 gc,
+	//	clientSet:          clientSet,
+	//	apiExtensionClient: apiExtensionClient,
+	//	dynamicClient:      dynamicClient,
+	//	metadataClient:     metadataClient,
+	//	startGC:            startGC,
+	//	syncPeriod:         syncPeriod,
+	//}
+}
+
 func newCRDInstance(definition *apiextensionsv1beta1.CustomResourceDefinition, namespace, name string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
