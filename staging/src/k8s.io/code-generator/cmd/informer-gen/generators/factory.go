@@ -232,6 +232,13 @@ func (f *sharedInformerFactory) InformerFor(obj {{.runtimeObject|raw}}, newFunc 
   return informer
 }
 
+// StartWithStoptions implements the controller-manager InformerFactory interface.
+// Because the sharedInformerFactory is used only with builtin types, there is no reason why StartWithStopOptions
+// should ever be used.
+// Dynamicinformer and metadatainformer factories actually implement StartWithStopOptions.
+func (f *sharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
+	f.Start(stopCh)
+}
 `
 
 var sharedInformerFactoryInterface = `
@@ -239,6 +246,7 @@ var sharedInformerFactoryInterface = `
 // API group versions.
 type SharedInformerFactory interface {
 	{{.informerFactoryInterface|raw}}
+	StartWithStopOptions(stopCh <-chan struct{})
 	ForResource(resource {{.schemaGroupVersionResource|raw}}) (GenericInformer, error)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
 
