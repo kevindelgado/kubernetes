@@ -18,6 +18,7 @@ package metadatainformer
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/diff"
 	"k8s.io/client-go/metadata/fake"
+	core "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -52,9 +54,9 @@ func TestMetadataSharedInformerFactory(t *testing.T) {
 		{
 			name: "scenario 1: test if adding an object triggers AddFunc",
 			ns:   "ns-foo",
-			gvr:  schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"},
+			gvr:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 			trigger: func(gvr schema.GroupVersionResource, ns string, fakeClient *fake.FakeMetadataClient, _ *metav1.PartialObjectMetadata) *metav1.PartialObjectMetadata {
-				testObject := newPartialObjectMetadata("extensions/v1beta1", "Deployment", "ns-foo", "name-foo")
+				testObject := newPartialObjectMetadata("apps/v1", "Deployment", "ns-foo", "name-foo")
 				createdObj, err := fakeClient.Resource(gvr).Namespace(ns).(fake.MetadataClient).CreateFake(testObject, metav1.CreateOptions{})
 				if err != nil {
 					t.Error(err)
@@ -74,8 +76,8 @@ func TestMetadataSharedInformerFactory(t *testing.T) {
 		{
 			name:        "scenario 2: tests if updating an object triggers UpdateFunc",
 			ns:          "ns-foo",
-			gvr:         schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"},
-			existingObj: newPartialObjectMetadata("extensions/v1beta1", "Deployment", "ns-foo", "name-foo"),
+			gvr:         schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+			existingObj: newPartialObjectMetadata("apps/v1", "Deployment", "ns-foo", "name-foo"),
 			trigger: func(gvr schema.GroupVersionResource, ns string, fakeClient *fake.FakeMetadataClient, testObject *metav1.PartialObjectMetadata) *metav1.PartialObjectMetadata {
 				if testObject.Annotations == nil {
 					testObject.Annotations = make(map[string]string)
@@ -100,8 +102,8 @@ func TestMetadataSharedInformerFactory(t *testing.T) {
 		{
 			name:        "scenario 3: test if deleting an object triggers DeleteFunc",
 			ns:          "ns-foo",
-			gvr:         schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"},
-			existingObj: newPartialObjectMetadata("extensions/v1beta1", "Deployment", "ns-foo", "name-foo"),
+			gvr:         schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+			existingObj: newPartialObjectMetadata("apps/v1", "Deployment", "ns-foo", "name-foo"),
 			trigger: func(gvr schema.GroupVersionResource, ns string, fakeClient *fake.FakeMetadataClient, testObject *metav1.PartialObjectMetadata) *metav1.PartialObjectMetadata {
 				err := fakeClient.Resource(gvr).Namespace(ns).Delete(context.TODO(), testObject.GetName(), metav1.DeleteOptions{})
 				if err != nil {
@@ -153,6 +155,64 @@ func TestMetadataSharedInformerFactory(t *testing.T) {
 				t.Errorf("tested informer haven't received an object, waited %v", timeout)
 			}
 		})
+	}
+}
+
+// TestSpecificInformerStopOnError tests that when an informer's
+// lister errors out, the informer itself will shut down when
+// stopOptions are set to stopOnError and will not shut down when
+// stopOptions are NOT set to stopOnError
+func TestSpecificInformerStopOnError(t *testing.T) {
+	scenarios := []struct {
+		stopOnError bool
+	}{
+		{
+			stopOnError: true,
+		},
+		{
+			stopOnError: false,
+		},
+	}
+
+	for _, ts := range scenarios {
+		timeout := time.Duration(3 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		stopOnErrorFunc := func(error) bool {
+			return ts.stopOnError
+		}
+		testObject := newPartialObjectMetadata("apps/v1", "Deployment", "ns-foo", "name-foo")
+		scheme := runtime.NewScheme()
+		metav1.AddMetaToScheme(scheme)
+		fakeClient := fake.NewSimpleMetadataClient(scheme, []runtime.Object{testObject}...)
+		gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+		listReactor := func(a core.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("forced list error")
+		}
+		fakeClient.PrependReactor("*", "*", listReactor)
+		target := NewSharedInformerFactoryWithOptions(fakeClient, 0, WithStopOnError(stopOnErrorFunc))
+
+		// retrieve the informer for the resource forces the factory to create the informer.
+		_ = target.ForResource(gvr)
+		infCtx, _ := context.WithCancel(ctx)
+		target.Start(infCtx.Done())
+		info := target.ForStoppableResource(gvr)
+		if info == nil {
+			t.Fatalf("Unable to retrieve done channel for gvr")
+		}
+
+		select {
+		case <-info.Done:
+			if !ts.stopOnError {
+				t.Errorf("informer should NOT have stopped when stopOnError is false")
+			}
+		// timer must be shorter than the timeout or else it will close doneChannel
+		// and the select statement will race.
+		case <-time.NewTimer(2 * time.Second).C:
+			if ts.stopOnError {
+				t.Errorf("informer SHOULD have stopped itself when stopOnError is true, waited 2s")
+			}
+		}
 	}
 }
 
