@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	kubeapiservertesting "k8s.io/kubernetes/cmd/kube-apiserver/app/testing"
 	"k8s.io/kubernetes/test/integration/framework"
+	"k8s.io/kubernetes/test/integration/util"
 )
 
 type roundTripFunc func(req *http.Request) (*http.Response, error)
@@ -71,8 +72,8 @@ func TestClusterScopedOwners(t *testing.T) {
 
 	_, clientSet := ctx.gc, ctx.clientSet
 
-	ns := createNamespaceOrDie("gc-cluster-scope-deletion", clientSet, t)
-	defer deleteNamespaceOrDie(ns.Name, clientSet, t)
+	ns := util.CreateNamespaceOrDie("gc-cluster-scope-deletion", clientSet, t)
+	defer util.DeleteNamespaceOrDie(ns.Name, clientSet, t)
 
 	t.Log("Create a pair of objects")
 	pv, err := clientSet.CoreV1().PersistentVolumes().Create(context.TODO(), &v1.PersistentVolume{
