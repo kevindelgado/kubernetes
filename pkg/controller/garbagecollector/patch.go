@@ -65,8 +65,8 @@ func (gc *GarbageCollector) getMetadata(apiVersion, kind, namespace, name string
 	}
 	gc.dependencyGraphBuilder.monitorLock.RLock()
 	defer gc.dependencyGraphBuilder.monitorLock.RUnlock()
-	m, ok := gc.dependencyGraphBuilder.monitors[apiResource]
-	if !ok || m == nil {
+	shared, ok := gc.dependencyGraphBuilder.monitors[apiResource]
+	if !ok || shared == nil {
 		// If local cache doesn't exist for mapping.Resource, send a GET request to API server
 		return gc.metadataClient.Resource(apiResource).Namespace(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	}
@@ -74,7 +74,7 @@ func (gc *GarbageCollector) getMetadata(apiVersion, kind, namespace, name string
 	if len(namespace) != 0 {
 		key = namespace + "/" + name
 	}
-	raw, exist, err := m.store.GetByKey(key)
+	raw, exist, err := shared.GetStore().GetByKey(key)
 	if err != nil {
 		return nil, err
 	}
