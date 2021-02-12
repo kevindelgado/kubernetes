@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -154,8 +155,11 @@ type SharedInformer interface {
 	GetStore() Store
 	// GetController is deprecated, it does nothing useful
 	GetController() Controller
-	// Run starts and runs the shared informer, returning after it stops.
-	// The informer will be stopped when stopCh is closed.
+	// RunWithStopOptions starts and runs the shared informer, returning after it stops.
+	// The informer will be stopped when a stopOptions condition is met.
+	RunWithStopOptions(ctx context.Context, stopOptions StopOptions)
+	// Run supports the legacy way interface for running shared index informers
+	// with just a stop channel.
 	Run(stopCh <-chan struct{})
 	// HasSynced returns true if the shared informer's store has been
 	// informed by at least one full LIST of the authoritative state
@@ -180,6 +184,21 @@ type SharedInformer interface {
 	// The handler should return quickly - any expensive processing should be
 	// offloaded.
 	SetWatchErrorHandler(handler WatchErrorHandler) error
+}
+
+// DoneChannel is a type alias for a channel that closes when an informer is stopped.
+type DoneChannel <-chan struct{}
+
+// StopOnErrorFunc is a type alias for function that receives an error
+// anytime the underlying reflector's ListAndWatch call returns an error
+// and determines whether or not to stop the reflector (and corresponding controller and shared informer).
+type StopOnErrorFunc func(error) bool
+
+// StopOptions let the caller specify which conditions to stop the informer.
+type StopOptions struct {
+	// StopOnError inspects errors returned from the underlying reflector's ListAndWatch call,
+	// and based on the error determines whether or not to stop the informer.
+	StopOnError StopOnErrorFunc
 }
 
 // SharedIndexInformer provides add and get Indexers ability based on SharedInformer.
@@ -332,6 +351,9 @@ type dummyController struct {
 func (v *dummyController) Run(stopCh <-chan struct{}) {
 }
 
+func (v *dummyController) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
+}
+
 func (v *dummyController) HasSynced() bool {
 	return v.informer.HasSynced()
 }
@@ -365,9 +387,10 @@ func (s *sharedIndexInformer) SetWatchErrorHandler(handler WatchErrorHandler) er
 	return nil
 }
 
-func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
+func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
 	defer utilruntime.HandleCrash()
-
+	ctrlCtx, ctrlCancel := context.WithCancel(ctx)
+	defer ctrlCancel()
 	fifo := NewDeltaFIFOWithOptions(DeltaFIFOOptions{
 		KnownObjects:          s.indexer,
 		EmitDeltaTypeReplaced: true,
@@ -407,7 +430,20 @@ func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 		defer s.startedLock.Unlock()
 		s.stopped = true // Don't want any new listeners
 	}()
-	s.controller.Run(stopCh)
+	s.controller.RunWithStopOptions(ctrlCtx, stopOptions)
+}
+
+func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
+	ctx, cancel := context.WithCancel(context.TODO())
+	go func() {
+		select {
+		case <-stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	s.RunWithStopOptions(ctx, StopOptions{})
 }
 
 func (s *sharedIndexInformer) HasSynced() bool {
