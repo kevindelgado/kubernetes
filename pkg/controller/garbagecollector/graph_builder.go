@@ -82,9 +82,19 @@ type GraphBuilder struct {
 	// dependencyGraphBuilder
 	monitors    monitors
 	monitorLock sync.RWMutex
-	// stoppedResources is the set resources that have been stopped
-	// in between garbage collector syncs.
-	// They get removed from the set following the next gc Sync.
+	// stoppedResources is the set of resources that have been uninstalled
+	// from the cluster in between gc Syncs.
+	// When the resource is uninstalled the shared informer for the resource
+	// (as well as the underlying controller and reflector) are stopped.
+	// We need to track these resources because if they are reinstalled before
+	// the next Sync, the garbage collector will be unaware that the informer
+	// has been stopped and will not restart the informer.
+	// On the next gc Sync all resources in the stoppedResources set that have
+	// been reinstalled will have their informer restarted and all resources
+	// will be removed from the set. Resources that have not been reinstalled
+	// have now been recognized as uninstalled by the GC and in the event that
+	// they are reinstalled on the cluster at a later time, will have their
+	// informers started by the first Sync call following their reinstallation.
 	stoppedResources     resourceSet
 	stoppedResourcesLock sync.RWMutex
 	// informersStarted is closed after after all of the controllers have been initialized and are running.
@@ -118,16 +128,10 @@ type GraphBuilder struct {
 	ignoredResources map[schema.GroupResource]struct{}
 }
 
-// monitor runs a Controller with a local stop channel.
-type monitor struct {
-	controller cache.Controller
-	store      cache.Store
-}
-
-type monitors map[schema.GroupVersionResource]*monitor
+type monitors map[schema.GroupVersionResource]cache.SharedIndexInformer
 type resourceSet map[schema.GroupVersionResource]struct{}
 
-func (gb *GraphBuilder) controllerFor(resource schema.GroupVersionResource, kind schema.GroupVersionKind) (cache.Controller, cache.Store, error) {
+func (gb *GraphBuilder) informerFor(resource schema.GroupVersionResource, kind schema.GroupVersionKind) (cache.SharedIndexInformer, error) {
 	handlers := cache.ResourceEventHandlerFuncs{
 		// add the event to the dependencyGraphBuilder's graphChanges.
 		AddFunc: func(obj interface{}) {
@@ -162,15 +166,15 @@ func (gb *GraphBuilder) controllerFor(resource schema.GroupVersionResource, kind
 			gb.graphChanges.Add(event)
 		},
 	}
-	shared, err := gb.sharedInformers.ForResource(resource)
+	generic, err := gb.sharedInformers.ForResource(resource)
 	if err != nil {
 		klog.V(4).Infof("unable to use a shared informer for resource %q, kind %q: %v", resource.String(), kind.String(), err)
-		return nil, nil, err
+		return nil, err
 	}
 	klog.V(4).Infof("using a shared informer for resource %q, kind %q", resource.String(), kind.String())
 	// need to clone because it's from a shared cache
-	shared.Informer().AddEventHandlerWithResyncPeriod(handlers, ResourceResyncTime)
-	return shared.Informer().GetController(), shared.Informer().GetStore(), nil
+	generic.Informer().AddEventHandlerWithResyncPeriod(handlers, ResourceResyncTime)
+	return generic.Informer(), nil
 }
 
 // filterStoppedResources filters out the resources that have been removed
@@ -221,12 +225,12 @@ func (gb *GraphBuilder) syncMonitors(resources map[schema.GroupVersionResource]s
 			errs = append(errs, fmt.Errorf("couldn't look up resource %q: %v", resource, err))
 			continue
 		}
-		c, s, err := gb.controllerFor(resource, kind)
+		shared, err := gb.informerFor(resource, kind)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("couldn't start monitor for resource %q: %v", resource, err))
 			continue
 		}
-		current[resource] = &monitor{store: s, controller: c}
+		current[resource] = shared
 		added++
 	}
 	gb.monitors = current
@@ -234,6 +238,18 @@ func (gb *GraphBuilder) syncMonitors(resources map[schema.GroupVersionResource]s
 	klog.V(4).Infof("synced monitors; added %d, kept %d, removed %d", added, kept, len(toRemove))
 	// NewAggregate returns nil if errs is 0-length
 	return utilerrors.NewAggregate(errs)
+}
+
+// addStoppedResource adds a specific gvr to the set of recently stopped resources
+// so that the next sync iteration knows to restart the informer
+// In the event that a sync occurs between when doneCh fires
+// and the stoppedResourcesLock is acquired the resources informer
+// will be restarted two syncs in row, the resource will wait until the following
+// sync to restart its informer.
+func (gb *GraphBuilder) addStoppedResource(gvr schema.GroupVersionResource) {
+	gb.stoppedResourcesLock.Lock()
+	defer gb.stoppedResourcesLock.Unlock()
+	gb.stoppedResources[gvr] = struct{}{}
 }
 
 // startMonitors ensures the current set of monitors are running. Any newly
@@ -253,17 +269,12 @@ func (gb *GraphBuilder) startMonitors() {
 	// that they don't get unexpected events on their work queues.
 	<-gb.informersStarted
 
-	gb.sharedInformers.StartWithStopOptions(gb.stopCh)
-	monitors := gb.monitors
-	for gvr := range monitors {
-		// TODO(kdelga): Should we only be doing this when ok?
-		if doneCh, ok := gb.sharedInformers.DoneChannelFor(gvr); ok {
+	gb.sharedInformers.Start(gb.stopCh)
+	for gvr := range gb.monitors {
+		if info, ok := gb.sharedInformers.ForStoppableResource(gvr); ok {
 			go func() {
-				<-doneCh
-				// push to set of recently stopped resources.
-				gb.stoppedResourcesLock.Lock()
-				defer gb.stoppedResourcesLock.Unlock()
-				gb.stoppedResources[gvr] = struct{}{}
+				<-info.Done
+				gb.addStoppedResource(gvr)
 			}()
 		}
 	}
@@ -283,8 +294,8 @@ func (gb *GraphBuilder) IsSynced() bool {
 		return false
 	}
 
-	for resource, monitor := range gb.monitors {
-		if !monitor.controller.HasSynced() {
+	for resource, shared := range gb.monitors {
+		if !shared.HasSynced() {
 			klog.V(4).Infof("garbage controller monitor not yet synced: %+v", resource)
 			return false
 		}

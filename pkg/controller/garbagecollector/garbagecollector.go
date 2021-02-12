@@ -180,7 +180,7 @@ func (gc *GarbageCollector) Sync(discoveryClient discovery.ServerResourcesInterf
 		// Get the current resource list from discovery.
 		newResources := GetDeletableResources(discoveryClient)
 
-		// Filter resources that have been uninstalled and reinstalled stopped since the last sync.
+		// Filter resources that have been uninstalled and reinstalled on the cluster since the last sync.
 		// The following sync will recognize them as new resources and they will be restarted.
 		// If we do not filter them out, the informer that was previously stopped will not get restarted.
 		gc.dependencyGraphBuilder.filterStoppedResources(newResources)

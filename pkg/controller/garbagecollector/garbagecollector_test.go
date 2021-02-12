@@ -66,7 +66,7 @@ type testRESTMapper struct {
 	meta.RESTMapper
 }
 
-var onListError = func(error) bool { return true }
+var stopOnListError = func(error) bool { return true }
 
 func (*testRESTMapper) Reset() {}
 
@@ -89,7 +89,7 @@ func TestGarbageCollectorConstruction(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	sharedInformers := informers.NewSharedInformerFactory(client, 0)
-	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, 0, metadatainformer.WithOnListError(onListError))
+	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, 0, metadatainformer.WithStopOnListError(stopOnListError))
 	// No monitor will be constructed for the non-core resource, but the GC
 	// construction will not fail.
 	alwaysStarted := make(chan struct{})
@@ -220,7 +220,7 @@ func setupGC(t *testing.T, config *restclient.Config) garbageCollector {
 		t.Fatal(err)
 	}
 	stop := make(chan struct{})
-	go sharedInformers.StartWithStopOptions(stop)
+	go sharedInformers.Start(stop)
 	return garbageCollector{gc, stop}
 }
 
