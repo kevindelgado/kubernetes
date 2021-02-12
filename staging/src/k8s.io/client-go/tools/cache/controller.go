@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -96,12 +97,16 @@ type controller struct {
 // Controller is a low-level controller that is parameterized by a
 // Config and used in sharedIndexInformer.
 type Controller interface {
-	// Run does two things.  One is to construct and run a Reflector
+	// RunWithStopOptions does two things.  One is to construct and run a Reflector
 	// to pump objects/notifications from the Config's ListerWatcher
 	// to the Config's Queue and possibly invoke the occasional Resync
 	// on that Queue.  The other is to repeatedly Pop from the Queue
 	// and process with the Config's ProcessFunc.  Both of these
-	// continue until `stopCh` is closed.
+	// continue until the stopOptions recognize a stop condition.
+	RunWithStopOptions(ctx context.Context, stopOptions StopOptions)
+
+	// Run is the legacy interface for running a controller that once called,
+	// can only be stopped by closing the stop channel.
 	Run(stopCh <-chan struct{})
 
 	// HasSynced delegates to the Config's Queue
@@ -121,13 +126,14 @@ func New(c *Config) Controller {
 	return ctlr
 }
 
-// Run begins processing items, and will continue until a value is sent down stopCh or it is closed.
-// It's an error to call Run more than once.
-// Run blocks; call via go.
-func (c *controller) Run(stopCh <-chan struct{}) {
+// RunWithStopOptions begins processing items, and will continue until stopOptions recognizes a stop condition.
+// It's an error to call RunWithStopOptions more than once.
+// RunWithStopOptions blocks, call via go.
+func (c *controller) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
 	defer utilruntime.HandleCrash()
+	refCtx, refCancel := context.WithCancel(ctx)
 	go func() {
-		<-stopCh
+		<-refCtx.Done()
 		c.config.Queue.Close()
 	}()
 	r := NewReflector(
@@ -147,12 +153,36 @@ func (c *controller) Run(stopCh <-chan struct{}) {
 	c.reflector = r
 	c.reflectorMutex.Unlock()
 
-	var wg wait.Group
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// refCancel must be deferred in the goroutine that calls RunWithStopOptions
+		// on the reflector rather than in the main thread because it will never get cancelled
+		// because the processLoop waits on it to fire.
+		defer refCancel()
+		r.RunWithStopOptions(refCtx, stopOptions)
+	}()
 
-	wg.StartWithChannel(stopCh, r.Run)
-
-	wait.Until(c.processLoop, time.Second, stopCh)
+	wait.Until(c.processLoop, time.Second, refCtx.Done())
 	wg.Wait()
+}
+
+// Run supports calling RunWithStopOptions with just a stop channel
+// that when closed, is the only stop condition that will stop the controller.
+// It's an error to call Run more than once.
+// Run blocks, call via go.
+func (c *controller) Run(stopCh <-chan struct{}) {
+	ctx, cancel := context.WithCancel(context.TODO())
+	go func() {
+		select {
+		case <-stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	c.RunWithStopOptions(ctx, StopOptions{})
 }
 
 // Returns true once this controller has completed an initial resource listing
