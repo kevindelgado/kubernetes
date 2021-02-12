@@ -20,15 +20,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/informers"
-	"k8s.io/client-go/tools/cache"
 )
 
 // SharedInformerFactory provides access to a shared informer and lister for dynamic client
 type SharedInformerFactory interface {
 	Start(stopCh <-chan struct{})
-	StartWithStopOptions(stopCh <-chan struct{})
 	ForResource(gvr schema.GroupVersionResource) informers.GenericInformer
-	DoneChannelFor(gvr schema.GroupVersionResource) (cache.DoneChannel, bool)
+	ForStoppableResource(gvr schema.GroupVersionResource) (*informers.StoppableInformerInfo, bool)
 	WaitForCacheSync(stopCh <-chan struct{}) map[schema.GroupVersionResource]bool
 }
 

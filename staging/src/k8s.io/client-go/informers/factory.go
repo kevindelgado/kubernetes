@@ -64,8 +64,6 @@ type sharedInformerFactory struct {
 	// startedInformers is used for tracking which informers have been started.
 	// This allows Start() to be called multiple times safely.
 	startedInformers map[reflect.Type]bool
-	// TODO: change startedInformers to map type to Done
-	stoppableInformers map[reflect.Type]cache.DoneChannel
 }
 
 // WithCustomResyncConfig sets a custom resync period for the specified informer types.
@@ -110,14 +108,12 @@ func NewFilteredSharedInformerFactory(client kubernetes.Interface, defaultResync
 // NewSharedInformerFactoryWithOptions constructs a new instance of a SharedInformerFactory with additional options.
 func NewSharedInformerFactoryWithOptions(client kubernetes.Interface, defaultResync time.Duration, options ...SharedInformerOption) SharedInformerFactory {
 	factory := &sharedInformerFactory{
-		client:        client,
-		namespace:     v1.NamespaceAll,
-		defaultResync: defaultResync,
-		informers:     make(map[reflect.Type]cache.SharedIndexInformer),
-		// TODO: find a way to unify the startedInformers set and stoppableInformers
-		startedInformers:   make(map[reflect.Type]bool),
-		stoppableInformers: make(map[reflect.Type]cache.DoneChannel),
-		customResync:       make(map[reflect.Type]time.Duration),
+		client:           client,
+		namespace:        v1.NamespaceAll,
+		defaultResync:    defaultResync,
+		informers:        make(map[reflect.Type]cache.SharedIndexInformer),
+		startedInformers: make(map[reflect.Type]bool),
+		customResync:     make(map[reflect.Type]time.Duration),
 	}
 
 	// Apply all options
@@ -186,29 +182,11 @@ func (f *sharedInformerFactory) InformerFor(obj runtime.Object, newFunc internal
 	return informer
 }
 
-// StartWithStoptions implements the controller-manager InformerFactory interface.
-// Because the sharedInformerFactory is used only with builtin types, there is no reason why StartWithStopOptions
-// should ever be used.
-// Dynamicinformer and metadatainformer factories actually implement StartWithStopOptions.
-func (f *sharedInformerFactory) StartWithStopOptions(stopCh <-chan struct{}) {
-	f.Start(stopCh)
-}
-
-// DoneChannelFor returns the done channel indicating the when the resource's informer is stopped.
-// This exists to satisfy the InformerFactory interface, but because sharedInformerFactory is only
-// used with builtin types it is not expected to ever be called (because StartWithStopOptions is never used).
-// Dynamicinformer and metadatainformer factories actually implement DoneChannelFor.
-func (f *sharedInformerFactory) DoneChannelFor(resource schema.GroupVersionResource) (cache.DoneChannel, bool) {
-	klog.Warningf("DoneChannelFor unsupported by sharedInformerFactory.")
-	return nil, false
-}
-
 // SharedInformerFactory provides shared informers for resources in all known
 // API group versions.
 type SharedInformerFactory interface {
 	internalinterfaces.SharedInformerFactory
-	StartWithStopOptions(stopCh <-chan struct{})
-	DoneChannelFor(resource schema.GroupVersionResource) (cache.DoneChannel, bool)
+	ForStoppableResource(resource schema.GroupVersionResource) (*StoppableInformerInfo, bool)
 	ForResource(resource schema.GroupVersionResource) (GenericInformer, error)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
 
