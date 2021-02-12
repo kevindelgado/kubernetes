@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -102,6 +103,54 @@ func TestRunUntil(t *testing.T) {
 	case <-time.After(wait.ForeverTestTimeout):
 		t.Errorf("the cancellation is at least %s late", wait.ForeverTestTimeout.String())
 		break
+	}
+}
+
+// TestReflectorRunWithStopOptions tests that when the lister is forced to always error out
+// the reflector will stop when it's StopOnListError returns true
+// and the reflector will not stop when it's StopOnListError returns false.
+func TestReflectorRunWithStopOptions(t *testing.T) {
+	table := []struct {
+		stopOnListError bool
+	}{
+		{true},
+		{false},
+	}
+	for _, item := range table {
+
+		store := NewStore(MetaNamespaceKeyFunc)
+		r := NewReflector(&testLW{}, &v1.Pod{}, store, 0)
+		listErr := errors.New("list error")
+		_ = watch.NewFake()
+		r.listerWatcher = &testLW{
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				panic("unreachable")
+			},
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return nil, listErr
+			},
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			// confirm the reflector stops running when it hits a list error
+			defer cancel()
+			r.RunWithStopOptions(ctx, StopOptions{
+				StopOnListError: func(err error) bool {
+					return item.stopOnListError
+				},
+			})
+		}()
+		select {
+		case <-ctx.Done():
+			if !item.stopOnListError {
+				t.Errorf("reflector should NOT have stopped when stopOnListError is false")
+			}
+		case <-time.After(3 * time.Second):
+			if item.stopOnListError {
+				t.Errorf("reflector SHOULD have stopped itself when stopOnListError is true, waited 3s")
+			}
+		}
 	}
 }
 

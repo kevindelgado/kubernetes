@@ -212,17 +212,39 @@ func (r *Reflector) setExpectedType(expectedType interface{}) {
 // call chains to NewReflector, so they'd be low entropy names for reflectors
 var internalPackages = []string{"client-go/tools/cache/"}
 
-// Run repeatedly uses the reflector's ListAndWatch to fetch all the
+// RunWithStopOptions repeatedly uses the reflector's ListAndWatch to fetch all the
 // objects and subsequent deltas.
-// Run will exit when stopCh is closed.
-func (r *Reflector) Run(stopCh <-chan struct{}) {
+// RunWithStopOptions will exit when one of the stopOptions conditions is met.
+func (r *Reflector) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
 	klog.V(2).Infof("Starting reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
+	lwCtx, lwCancel := context.WithCancel(ctx)
 	wait.BackoffUntil(func() {
-		if err := r.ListAndWatch(stopCh); err != nil {
+		if err := r.ListAndWatch(lwCtx.Done()); err != nil {
 			r.watchErrorHandler(r, err)
+			// default to never stopping (same as previous behavior that only had stop channel)
+			if onListErr := stopOptions.StopOnListError; onListErr != nil {
+				if stopOptions.StopOnListError(err) {
+					klog.V(2).Infof("Closing with list err, type %s", r.expectedTypeName)
+					lwCancel()
+				}
+			}
 		}
-	}, r.backoffManager, true, stopCh)
+	}, r.backoffManager, true, lwCtx.Done())
 	klog.V(2).Infof("Stopping reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
+}
+
+// Run calls RunWithStopOptions and only exits when stopCh is closed
+func (r *Reflector) Run(stopCh <-chan struct{}) {
+	ctx, cancel := context.WithCancel(context.TODO())
+	go func() {
+		select {
+		case <-stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	r.RunWithStopOptions(ctx, StopOptions{})
+
 }
 
 var (

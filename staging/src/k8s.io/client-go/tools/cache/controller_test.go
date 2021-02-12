@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -31,7 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	fcache "k8s.io/client-go/tools/cache/testing"
 
-	"github.com/google/gofuzz"
+	fuzz "github.com/google/gofuzz"
 )
 
 func Example() {
@@ -446,5 +447,40 @@ func TestPanicPropagated(t *testing.T) {
 		}
 	case <-time.After(wait.ForeverTestTimeout):
 		t.Errorf("timeout: the panic failed to propagate from the controller run method!")
+	}
+}
+
+// TestControllerRunWithStopOptions confirms that a controller stops itself
+// when the underlying reflector hits a list error by starting a controller
+// and in a separatre goroutine and waiting for the controller stops itself
+// before cancelling the context. If the context is stopped before the test
+// timeout, that means the controller stopped itself as expected.
+func TestControllerRunWithStopOptions(t *testing.T) {
+	source := fcache.NewFakeControllerSource()
+	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
+	source.ListError = fmt.Errorf("Access Denied")
+
+	_, controller := NewInformer(
+		source,
+		&v1.Pod{},
+		time.Millisecond*100,
+		ResourceEventHandlerFuncs{},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		// confirm the controller stops running when it hits a list error
+		defer cancel()
+		controller.RunWithStopOptions(ctx, StopOptions{
+			StopOnListError: func(err error) bool {
+				return true
+			},
+		})
+	}()
+	select {
+	case <-ctx.Done():
+		break
+	case <-time.After(5 * time.Second):
+		t.Errorf("the cancellation is at least %s late", wait.ForeverTestTimeout.String())
+		break
 	}
 }
