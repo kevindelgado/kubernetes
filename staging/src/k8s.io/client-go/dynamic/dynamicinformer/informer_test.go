@@ -18,6 +18,7 @@ package dynamicinformer_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/diff"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/dynamic/fake"
+	core "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -143,9 +145,9 @@ func TestDynamicSharedInformerFactory(t *testing.T) {
 		{
 			name: "scenario 1: test if adding an object triggers AddFunc",
 			ns:   "ns-foo",
-			gvr:  schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"},
+			gvr:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 			trigger: func(gvr schema.GroupVersionResource, ns string, fakeClient *fake.FakeDynamicClient, _ *unstructured.Unstructured) *unstructured.Unstructured {
-				testObject := newUnstructured("extensions/v1beta1", "Deployment", "ns-foo", "name-foo")
+				testObject := newUnstructured("apps/v1", "Deployment", "ns-foo", "name-foo")
 				createdObj, err := fakeClient.Resource(gvr).Namespace(ns).Create(context.TODO(), testObject, metav1.CreateOptions{})
 				if err != nil {
 					t.Error(err)
@@ -165,8 +167,8 @@ func TestDynamicSharedInformerFactory(t *testing.T) {
 		{
 			name:        "scenario 2: tests if updating an object triggers UpdateFunc",
 			ns:          "ns-foo",
-			gvr:         schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"},
-			existingObj: newUnstructured("extensions/v1beta1", "Deployment", "ns-foo", "name-foo"),
+			gvr:         schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+			existingObj: newUnstructured("apps/v1", "Deployment", "ns-foo", "name-foo"),
 			trigger: func(gvr schema.GroupVersionResource, ns string, fakeClient *fake.FakeDynamicClient, testObject *unstructured.Unstructured) *unstructured.Unstructured {
 				testObject.Object["spec"] = "updatedName"
 				updatedObj, err := fakeClient.Resource(gvr).Namespace(ns).Update(context.TODO(), testObject, metav1.UpdateOptions{})
@@ -188,8 +190,8 @@ func TestDynamicSharedInformerFactory(t *testing.T) {
 		{
 			name:        "scenario 3: test if deleting an object triggers DeleteFunc",
 			ns:          "ns-foo",
-			gvr:         schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"},
-			existingObj: newUnstructured("extensions/v1beta1", "Deployment", "ns-foo", "name-foo"),
+			gvr:         schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+			existingObj: newUnstructured("apps/v1", "Deployment", "ns-foo", "name-foo"),
 			trigger: func(gvr schema.GroupVersionResource, ns string, fakeClient *fake.FakeDynamicClient, testObject *unstructured.Unstructured) *unstructured.Unstructured {
 				err := fakeClient.Resource(gvr).Namespace(ns).Delete(context.TODO(), testObject.GetName(), metav1.DeleteOptions{})
 				if err != nil {
@@ -222,7 +224,7 @@ func TestDynamicSharedInformerFactory(t *testing.T) {
 			// don't adjust the scheme to include deploymentlist. This is testing whether an informer can be created against using
 			// a client that doesn't have a type registered in the scheme.
 			gvrToListKind := map[schema.GroupVersionResource]string{
-				{Group: "extensions", Version: "v1beta1", Resource: "deployments"}: "DeploymentList",
+				{Group: "apps", Version: "v1", Resource: "deployments"}: "DeploymentList",
 			}
 			fakeClient := fake.NewSimpleDynamicClientWithCustomListKinds(scheme, gvrToListKind, objs...)
 			target := dynamicinformer.NewDynamicSharedInformerFactory(fakeClient, 0)
@@ -245,6 +247,65 @@ func TestDynamicSharedInformerFactory(t *testing.T) {
 				t.Errorf("tested informer haven't received an object, waited %v", timeout)
 			}
 		})
+	}
+}
+
+// TestSpecificInformerStopOnError tests that when an informer's
+// lister errors out, the informer itself will shut down when
+// stopOptions are set to stopOnError and will not shut down when
+// stopOptions are NOT set to stopOnError
+func TestSpecificInformerStopOnError(t *testing.T) {
+	scenarios := []struct {
+		stopOnError bool
+	}{
+		{
+			stopOnError: true,
+		},
+		{
+			stopOnError: false,
+		},
+	}
+
+	for _, ts := range scenarios {
+		timeout := time.Duration(3 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		onErrorFunc := func(error) bool {
+			return ts.stopOnError
+		}
+		testObject := newUnstructured("apps/v1", "Deployment", "ns-foo", "name-foo")
+		gvrToListKind := map[schema.GroupVersionResource]string{
+			{Group: "apps", Version: "v1", Resource: "deployments"}: "DeploymentList",
+		}
+		fakeClient := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), gvrToListKind, []runtime.Object{testObject}...)
+		gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+		listReactor := func(a core.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("forced list error")
+		}
+		fakeClient.PrependReactor("*", "*", listReactor)
+		target := dynamicinformer.NewDynamicSharedInformerFactoryWithOptions(fakeClient, 0, dynamicinformer.WithStopOnError(onErrorFunc))
+
+		// retrieve the informer for the resource forces the factory to create the informer.
+		_ = target.ForResource(gvr)
+		infCtx, _ := context.WithCancel(ctx)
+		target.Start(infCtx.Done())
+		info := target.ForStoppableResource(gvr)
+		if info == nil {
+			t.Fatalf("Unable to retrieve done channel for gvr")
+		}
+
+		select {
+		case <-info.Done:
+			if !ts.stopOnError {
+				t.Errorf("informer should NOT have stopped when stopOnError is false")
+			}
+		// timer must be shorter than the timeout or else it will close doneChannel
+		// and the select statement will race.
+		case <-time.NewTimer(2 * time.Second).C:
+			if ts.stopOnError {
+				t.Errorf("informer SHOULD have stopped itself when stopOnError is true, waited 2s")
+			}
+		}
 	}
 }
 
