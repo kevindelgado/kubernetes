@@ -99,10 +99,6 @@ type Reflector struct {
 	WatchListPageSize int64
 	// Called whenever the ListAndWatch drops the connection with an error.
 	watchErrorHandler WatchErrorHandler
-
-	// stopHandle contains channels for stopping and observing the stoppage of the reflector
-	// as well as err indicating why the reflector was stopped.
-	stopHandle StopHandle
 }
 
 // ResourceVersionUpdater is an interface that allows store implementation to
@@ -173,19 +169,6 @@ func NewReflector(lw ListerWatcher, expectedType interface{}, store Store, resyn
 
 // NewNamedReflector same as NewReflector, but with a specified name for logging
 func NewNamedReflector(name string, lw ListerWatcher, expectedType interface{}, store Store, resyncPeriod time.Duration) *Reflector {
-	return NewNamedReflectorWithStopHandle(name, lw, expectedType, store, resyncPeriod, nil)
-}
-
-// NewReflectorWithStopHandle same as NewReflector, but with a specified stopHandle.
-func NewReflectorWithStopHandle(lw ListerWatcher, expectedType interface{}, store Store, resyncPeriod time.Duration, stopHandle StopHandle) *Reflector {
-	return NewNamedReflectorWithStopHandle(naming.GetNameFromCallsite(internalPackages...), lw, expectedType, store, resyncPeriod, stopHandle)
-}
-
-// NewNamedReflectorWithStopHandle same as NewNamedReflector, but with a specified stopHandle.
-func NewNamedReflectorWithStopHandle(name string, lw ListerWatcher, expectedType interface{}, store Store, resyncPeriod time.Duration, stopHandle StopHandle) *Reflector {
-	if stopHandle == nil {
-		stopHandle = NewStopHandle(make(chan struct{}))
-	}
 	realClock := &clock.RealClock{}
 	r := &Reflector{
 		name:          name,
@@ -199,7 +182,6 @@ func NewNamedReflectorWithStopHandle(name string, lw ListerWatcher, expectedType
 		resyncPeriod:           resyncPeriod,
 		clock:                  realClock,
 		watchErrorHandler:      WatchErrorHandler(DefaultWatchErrorHandler),
-		stopHandle:             stopHandle,
 	}
 	r.setExpectedType(expectedType)
 	return r
@@ -233,40 +215,36 @@ var internalPackages = []string{"client-go/tools/cache/"}
 // RunWithStopOptions repeatedly uses the reflector's ListAndWatch to fetch all the
 // objects and subsequent deltas.
 // RunWithStopOptions will exit when one of the stopOptions conditions is met.
-func (r *Reflector) RunWithStopOptions(stopOptions StopOptions) {
-	// TODO: should we populate stop handle if nil here to avoid panic?
+func (r *Reflector) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
 	klog.V(2).Infof("Starting reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
-	if stopOptions.ExternalStop != nil {
-		cancel := r.stopHandle.MergeChan(stopOptions.ExternalStop)
-		defer cancel()
-		stopOptions.ExternalStop = nil
-	}
+	lwCtx, lwCancel := context.WithCancel(ctx)
 	wait.BackoffUntil(func() {
-		if err := r.ListAndWatch(r.stopHandle.Done()); err != nil {
+		if err := r.ListAndWatch(lwCtx.Done()); err != nil {
 			r.watchErrorHandler(r, err)
-			onListErr := stopOptions.OnListError
 			// default to never stopping (same as previous behavior that only had stop channel)
-			if onListErr != nil {
-				if stopOptions.OnListError(err) {
-					r.stopHandle.WithError(err)
-					klog.V(2).Infof("Closing with list error %v", r.stopHandle.Err())
-					r.stopHandle.Close()
+			if onListErr := stopOptions.StopOnListError; onListErr != nil {
+				if stopOptions.StopOnListError(err) {
+					klog.V(2).Infof("Closing with list err, type %s", r.expectedTypeName)
+					lwCancel()
 				}
 			}
 		}
-	}, r.backoffManager, true, r.stopHandle.Done())
+	}, r.backoffManager, true, lwCtx.Done())
 	klog.V(2).Infof("Stopping reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
 }
 
 // Run calls RunWithStopOptions and only exits when stopCh is closed
 func (r *Reflector) Run(stopCh <-chan struct{}) {
-	cancel := r.stopHandle.MergeChan(stopCh)
-	defer cancel()
-	r.RunWithStopOptions(StopOptions{
-		OnListError: func(err error) bool {
-			return false
-		},
-	})
+	ctx, cancel := context.WithCancel(context.TODO())
+	go func() {
+		select {
+		case <-stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	r.RunWithStopOptions(ctx, StopOptions{})
+
 }
 
 var (

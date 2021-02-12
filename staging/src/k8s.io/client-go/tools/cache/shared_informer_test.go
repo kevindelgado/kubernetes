@@ -17,13 +17,14 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/clock"
@@ -358,25 +359,44 @@ func TestSharedInformerErrorHandling(t *testing.T) {
 	close(stop)
 }
 
-func TestSharedInformerStopOptions(t *testing.T) {
-	source := fcache.NewFakeControllerSource()
-	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
-	source.ListError = fmt.Errorf("Access Denied")
+// TestSharedInformerRunWithStopOptions runs an informer with StopOnListError
+// set to always return true. It tests that when the underlying reflector does reach a
+// list error (upon trying to add an object) that the informer stopps running before a
+// given timout.
+func TestSharedInformerRunWithStopOptions(t *testing.T) {
+	table := []struct {
+		stopOnListError bool
+	}{
+		{true},
+		{false},
+	}
+	for _, item := range table {
+		source := fcache.NewFakeControllerSource()
+		source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
+		source.ListError = fmt.Errorf("Access Denied")
 
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+		informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
 
-	go informer.RunWithStopOptions(StopOptions{
-		OnListError: func(err error) bool {
-			return true
-		},
-	})
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			// confirm the informer stops running when it hits a list error
+			defer cancel()
+			informer.RunWithStopOptions(ctx, StopOptions{
+				StopOnListError: func(err error) bool {
+					return item.stopOnListError
+				},
+			})
+		}()
 
-	select {
-	case <-informer.stopHandle.Done():
-		if !strings.Contains(informer.stopHandle.Err().Error(), "Access Denied") {
-			t.Errorf("Expected 'Access Denied' error. Actual: %v", informer.stopHandle.Err())
+		select {
+		case <-ctx.Done():
+			if !item.stopOnListError {
+				t.Errorf("shared informer should NOT have stopped when stopOnListError is false")
+			}
+		case <-time.After(time.Second):
+			if item.stopOnListError {
+				t.Errorf("shared informer SHOULD have stopped itself when stopOnListError is true, waited 3s")
+			}
 		}
-	case <-time.After(time.Second):
-		t.Errorf("Timeout waiting for error handler call")
 	}
 }
