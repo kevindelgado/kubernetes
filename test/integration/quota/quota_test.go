@@ -393,13 +393,84 @@ func TestQuotaLimitedResourceDenial(t *testing.T) {
 	}
 }
 
-func TestCRDQuota(t *testing.T) {
-	//ctx := setup(t, 2)
-	//defer ctx.tearDown()
-	workerCount := 2
+func TestQuotaCRDUninstallReinstall(t *testing.T) {
+	ctx := setup(t, 2)
+	defer ctx.tearDown()
+}
 
-	// Setup code from GC integration test
-	result := kubeapiservertesting.StartTestServerOrDie(t, nil, nil, framework.SharedEtcd())
+func TestQuotaCRD(t *testing.T) {
+	ctx := setup(t, 2)
+	defer ctx.tearDown()
+
+	// install crd on cluster, give it time to sync
+	ns := createNamespaceOrDie("test-crd", ctx.clientSet, t)
+	definition, resourceClient := createRandomCustomResourceDefinition(t, ctx.apiExtensionClient, ctx.dynamicClient, ns.Name)
+	time.Sleep(ctx.syncPeriod)
+
+	// create crd quota N
+	n := 3
+	quotaName := "quota"
+	hard := v1.ResourceList{}
+	resourceName := v1.ResourceName(fmt.Sprintf("count/%s.%s", definition.Spec.Names.Plural, definition.Spec.Group))
+	hard[resourceName] = resource.MustParse(strconv.Itoa(n))
+	quota := &v1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      quotaName,
+			Namespace: ns.Name,
+		},
+		Spec: v1.ResourceQuotaSpec{
+			Hard: hard,
+		},
+	}
+	waitForQuota(t, quota, ctx.clientSet)
+	// create n+1 crd objects, confirm failure of the last one
+	for i := 1; i < n+1; i++ {
+		// create a new crd instance
+		_, err := resourceClient.Create(context.TODO(), newCRDInstance(definition, ns.Name, fmt.Sprintf("crd-%d", i)), metav1.CreateOptions{})
+		if err != nil {
+			if i != n+1 {
+				t.Fatalf("failed to create crd on iteration: %d, err: %v", i, err)
+			}
+		} else {
+			// confirm that eventually, the resource quota used field
+			// equals the number of crd instances created
+			err := wait.Poll(time.Second, time.Minute, func() (bool, error) {
+				q, err := ctx.clientSet.CoreV1().ResourceQuotas(ns.Name).Get(context.TODO(), "quota", metav1.GetOptions{})
+				if err != nil {
+					return false, err
+				}
+				used, ok := q.Status.Used[resourceName]
+				if ok && used.AsDec().UnscaledBig().Int64() == int64(i) {
+					return true, nil
+				}
+				return false, nil
+			})
+			if err != nil {
+				t.Fatalf("err %v", err)
+			}
+		}
+	}
+
+}
+
+type testContext struct {
+	tearDown           func()
+	rq                 *resourcequotacontroller.Controller
+	clientSet          clientset.Interface
+	apiExtensionClient apiextensionsclientset.Interface
+	dynamicClient      dynamic.Interface
+	metadataClient     metadata.Interface
+	startRQ            func(workers int)
+	// syncPeriod is how often the GC started with startGC will be resynced.
+	syncPeriod time.Duration
+}
+
+// if workerCount > 0, will start the GC, otherwise it's up to the caller to Run() the GC.
+func setup(t *testing.T, workerCount int) *testContext {
+	return setupWithServer(t, kubeapiservertesting.StartTestServerOrDie(t, nil, nil, framework.SharedEtcd()), workerCount)
+}
+
+func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, workerCount int) *testContext {
 	clientSet, err := clientset.NewForConfig(result.ClientConfig)
 	if err != nil {
 		t.Fatalf("error creating clientset: %v", err)
@@ -491,167 +562,7 @@ func TestCRDQuota(t *testing.T) {
 		startRQ:            startRQ,
 		syncPeriod:         syncPeriod,
 	}
-	// install crd on cluster
-	//ns := createNamespaceOrDie("test-crd", clientSet, t)
-	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}}
-	definition, resourceClient := createRandomCustomResourceDefinition(t, ctx.apiExtensionClient, ctx.dynamicClient, ns.Name)
-	time.Sleep(6 * time.Second)
-
-	// create crd quota N
-	n := 3
-	//resourceString := fmt.Sprintf("%s/%s", definition.Spec.Group, definition.Spec.Names.Plural)
-
-	hard := v1.ResourceList{}
-	//resourceName := v1.ResourceName(v1.DefaultResourceRequestsPrefix + resourceString)
-	resourceName := v1.ResourceName(fmt.Sprintf("count/%s.%s", definition.Spec.Names.Plural, definition.Spec.Group))
-	hard[resourceName] = resource.MustParse(strconv.Itoa(n))
-	//hard[v1.ResourcePods] = resource.MustParse(strconv.Itoa(n))
-	quota := &v1.ResourceQuota{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "quota",
-			Namespace: ns.Name,
-		},
-		Spec: v1.ResourceQuotaSpec{
-			Hard: hard,
-		},
-	}
-	waitForQuota(t, quota, ctx.clientSet)
-	//time.Sleep(30 * time.Second)
-	// create n+1 crd objects, confirm failure of the last one
-	for i := 1; i < n+1; i++ {
-		crd, err := resourceClient.Create(context.TODO(), newCRDInstance(definition, ns.Name, fmt.Sprintf("crd-%d", i)), metav1.CreateOptions{})
-		if err != nil {
-			if i != n+1 {
-				t.Fatalf("failed to create crd on iteration: %d, err: %v", i, err)
-			} else {
-				t.Logf("expected to fail to create crd on iteration: %d, err: %v", i, err)
-			}
-		} else {
-			t.Logf("created crd %q\n obj is %v", crd.GetName(), crd)
-			crds, crdsErr := resourceClient.List(context.TODO(), metav1.ListOptions{})
-			t.Logf("crds list is %v\n err is %v\n", crds, crdsErr)
-			err := wait.Poll(time.Second, time.Minute, func() (bool, error) {
-
-				q, err := clientSet.CoreV1().ResourceQuotas(ns.Name).Get(context.TODO(), "quota", metav1.GetOptions{})
-				t.Logf("q is %v\n err is %v", q, err)
-				t.Logf("hard is %v", q.Status.Hard)
-				t.Logf("used is %v", q.Status.Used)
-				if err != nil {
-					return false, err
-				}
-				used, ok := q.Status.Used[resourceName]
-				if ok && used.Sign() > 0 {
-					t.Logf("exists in used!!")
-					t.Logf("AGAIN used is %v", q.Status.Used)
-					return true, nil
-				}
-				return false, nil
-			})
-			if err != nil {
-				t.Fatalf("err %v", err)
-			}
-		}
-		//time.Sleep(6 * time.Second)
-	}
-
-}
-
-type testContext struct {
-	tearDown func()
-	//gc                 *garbagecollector.GarbageCollector
-	rq                 *resourcequotacontroller.Controller
-	clientSet          clientset.Interface
-	apiExtensionClient apiextensionsclientset.Interface
-	dynamicClient      dynamic.Interface
-	metadataClient     metadata.Interface
-	startRQ            func(workers int)
-	// syncPeriod is how often the GC started with startGC will be resynced.
-	syncPeriod time.Duration
-}
-
-// if workerCount > 0, will start the GC, otherwise it's up to the caller to Run() the GC.
-func setup(t *testing.T, workerCount int) *testContext {
-	return setupWithServer(t, kubeapiservertesting.StartTestServerOrDie(t, nil, nil, framework.SharedEtcd()), workerCount)
-}
-
-func setupWithServer(t *testing.T, result *kubeapiservertesting.TestServer, workerCount int) *testContext {
-	return nil
-	//clientSet, err := clientset.NewForConfig(result.ClientConfig)
-	//if err != nil {
-	//	t.Fatalf("error creating clientset: %v", err)
-	//}
-
-	//// Helpful stuff for testing CRD.
-	//apiExtensionClient, err := apiextensionsclientset.NewForConfig(result.ClientConfig)
-	//if err != nil {
-	//	t.Fatalf("error creating extension clientset: %v", err)
-	//}
-	//// CreateNewCustomResourceDefinition wants to use this namespace for verifying
-	//// namespace-scoped CRD creation.
-	//createNamespaceOrDie("aval", clientSet, t)
-
-	//discoveryClient := cacheddiscovery.NewMemCacheClient(clientSet.Discovery())
-	//restMapper := restmapper.NewDeferredDiscoveryRESTMapper(discoveryClient)
-	//restMapper.Reset()
-	//config := *result.ClientConfig
-	//metadataClient, err := metadata.NewForConfig(&config)
-	//if err != nil {
-	//	t.Fatalf("failed to create metadataClient: %v", err)
-	//}
-	//dynamicClient, err := dynamic.NewForConfig(&config)
-	//if err != nil {
-	//	t.Fatalf("failed to create dynamicClient: %v", err)
-	//}
-	//onListError := func(error) bool { return true }
-	//sharedInformers := informers.NewSharedInformerFactory(clientSet, 0)
-	//metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, 0, metadatainformer.WithStopOnListError(onListError))
-	//alwaysStarted := make(chan struct{})
-	//close(alwaysStarted)
-
-	//// controller creation
-	//stopCh := make(chan struct{})
-	//tearDown := func() {
-	//	close(stopCh)
-	//	result.TearDownFn()
-	//}
-	//gc, err := garbagecollector.NewGarbageCollector(
-	//	clientSet,
-	//	metadataClient,
-	//	restMapper,
-	//	garbagecollector.DefaultIgnoredResources(),
-	//	informerfactory.NewInformerFactory(sharedInformers, metadataInformers),
-	//	alwaysStarted,
-	//)
-	//if err != nil {
-	//	t.Fatalf("failed to create garbage collector: %v", err)
-	//}
-
-	//syncPeriod := 5 * time.Second
-	//startGC := func(workers int) {
-	//	go wait.Until(func() {
-	//		// Resetting the REST mapper will also invalidate the underlying discovery
-	//		// client. This is a leaky abstraction and assumes behavior about the REST
-	//		// mapper, but we'll deal with it for now.
-	//		restMapper.Reset()
-	//	}, syncPeriod, stopCh)
-	//	go gc.Run(workers, stopCh)
-	//	go gc.Sync(clientSet.Discovery(), syncPeriod, stopCh)
-	//}
-
-	//if workerCount > 0 {
-	//	startGC(workerCount)
-	//}
-
-	//return &testContext{
-	//	tearDown:           tearDown,
-	//	gc:                 gc,
-	//	clientSet:          clientSet,
-	//	apiExtensionClient: apiExtensionClient,
-	//	dynamicClient:      dynamicClient,
-	//	metadataClient:     metadataClient,
-	//	startGC:            startGC,
-	//	syncPeriod:         syncPeriod,
-	//}
+	return ctx
 }
 
 func newCRDInstance(definition *apiextensionsv1beta1.CustomResourceDefinition, namespace, name string) *unstructured.Unstructured {
