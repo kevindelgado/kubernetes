@@ -393,10 +393,6 @@ func TestQuotaLimitedResourceDenial(t *testing.T) {
 	}
 }
 
-func TestCRDQuotaMaster(t *testing.T) {
-
-}
-
 func TestCRDQuota(t *testing.T) {
 	// Setup code from GC integration test
 	result := kubeapiservertesting.StartTestServerOrDie(t, nil, nil, framework.SharedEtcd())
@@ -515,7 +511,7 @@ func TestCRDQuota(t *testing.T) {
 			t.Logf("created crd %q\n obj is %v", crd.GetName(), crd)
 			crds, crdsErr := resourceClient.List(context.TODO(), metav1.ListOptions{})
 			t.Logf("crds list is %v\n err is %v\n", crds, crdsErr)
-			err := wait.Poll(4*time.Second, time.Minute, func() (bool, error) {
+			err := wait.Poll(time.Second, time.Minute, func() (bool, error) {
 
 				q, err := clientSet.CoreV1().ResourceQuotas(ns.Name).Get(context.TODO(), "quota", metav1.GetOptions{})
 				t.Logf("q is %v\n err is %v", q, err)
@@ -536,7 +532,7 @@ func TestCRDQuota(t *testing.T) {
 				t.Fatalf("err %v", err)
 			}
 		}
-		time.Sleep(6 * time.Second)
+		//time.Sleep(6 * time.Second)
 	}
 
 }
