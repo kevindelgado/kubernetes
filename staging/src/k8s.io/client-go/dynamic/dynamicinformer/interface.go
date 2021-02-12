@@ -26,6 +26,7 @@ import (
 type DynamicSharedInformerFactory interface {
 	Start(stopCh <-chan struct{})
 	ForResource(gvr schema.GroupVersionResource) informers.GenericInformer
+	ForStoppableResource(gvr schema.GroupVersionResource) (*informers.StoppableInformerInfo, bool)
 	WaitForCacheSync(stopCh <-chan struct{}) map[schema.GroupVersionResource]bool
 }
 

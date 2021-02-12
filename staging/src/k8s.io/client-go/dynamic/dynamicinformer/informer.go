@@ -32,23 +32,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// NewDynamicSharedInformerFactory constructs a new instance of dynamicSharedInformerFactory for all namespaces.
-func NewDynamicSharedInformerFactory(client dynamic.Interface, defaultResync time.Duration) DynamicSharedInformerFactory {
-	return NewFilteredDynamicSharedInformerFactory(client, defaultResync, metav1.NamespaceAll, nil)
-}
-
-// NewFilteredDynamicSharedInformerFactory constructs a new instance of dynamicSharedInformerFactory.
-// Listers obtained via this factory will be subject to the same filters as specified here.
-func NewFilteredDynamicSharedInformerFactory(client dynamic.Interface, defaultResync time.Duration, namespace string, tweakListOptions TweakListOptionsFunc) DynamicSharedInformerFactory {
-	return &dynamicSharedInformerFactory{
-		client:           client,
-		defaultResync:    defaultResync,
-		namespace:        namespace,
-		informers:        map[schema.GroupVersionResource]informers.GenericInformer{},
-		startedInformers: make(map[schema.GroupVersionResource]bool),
-		tweakListOptions: tweakListOptions,
-	}
-}
+// DynamicSharedInformerOption defines the functional option type for SharedInformerFactory.
+type DynamicSharedInformerOption func(*dynamicSharedInformerFactory) *dynamicSharedInformerFactory
 
 type dynamicSharedInformerFactory struct {
 	client        dynamic.Interface
@@ -59,11 +44,94 @@ type dynamicSharedInformerFactory struct {
 	informers map[schema.GroupVersionResource]informers.GenericInformer
 	// startedInformers is used for tracking which informers have been started.
 	// This allows Start() to be called multiple times safely.
-	startedInformers map[schema.GroupVersionResource]bool
-	tweakListOptions TweakListOptionsFunc
+	startedInformers   map[schema.GroupVersionResource]bool
+	stoppableInformers map[schema.GroupVersionResource]cache.DoneChannel
+	tweakListOptions   TweakListOptionsFunc
+	stopOnListError    cache.StopOnListErrorFunc
 }
 
 var _ DynamicSharedInformerFactory = &dynamicSharedInformerFactory{}
+
+// WithStopOnListError sets the onListErrFunc that is added to the stop options
+// when calling StartWithStopOptions.
+// This function results in every informer in this factory getting the same stop options.
+func WithStopOnListError(stopOnListError cache.StopOnListErrorFunc) DynamicSharedInformerOption {
+	return func(factory *dynamicSharedInformerFactory) *dynamicSharedInformerFactory {
+		factory.stopOnListError = stopOnListError
+		return factory
+	}
+}
+
+// WithTweakListOptions sets a custom filter on all listers of the configured SharedInformerFactory.
+func WithTweakListOptions(tweakListOptions TweakListOptionsFunc) DynamicSharedInformerOption {
+	return func(factory *dynamicSharedInformerFactory) *dynamicSharedInformerFactory {
+		factory.tweakListOptions = tweakListOptions
+		return factory
+	}
+}
+
+// WithNamespace limits the SharedInformerFactory to the specified namespace.
+func WithNamespace(namespace string) DynamicSharedInformerOption {
+	return func(factory *dynamicSharedInformerFactory) *dynamicSharedInformerFactory {
+		factory.namespace = namespace
+		return factory
+	}
+}
+
+// NewDynamicSharedInformerFactory constructs a new instance of dynamicSharedInformerFactory for all namespaces.
+func NewDynamicSharedInformerFactory(client dynamic.Interface, defaultResync time.Duration) DynamicSharedInformerFactory {
+	return NewDynamicSharedInformerFactoryWithOptions(client, defaultResync)
+}
+
+// NewFilteredDynamicSharedInformerFactory constructs a new instance of dynamicSharedInformerFactory.
+// Listers obtained via this factory will be subject to the same filters as specified here.
+// Deprecated: Please use NewDynamicSharedInformerFactoryWithOptions instead
+func NewFilteredDynamicSharedInformerFactory(client dynamic.Interface, defaultResync time.Duration, namespace string, tweakListOptions TweakListOptionsFunc) DynamicSharedInformerFactory {
+	return NewDynamicSharedInformerFactoryWithOptions(client, defaultResync, WithNamespace(namespace), WithTweakListOptions(tweakListOptions))
+}
+
+// NewDynamicSharedInformerFactoryWithOptions constructs a new instance of a dynamicSharedInformerFactory with additional options.
+func NewDynamicSharedInformerFactoryWithOptions(client dynamic.Interface, defaultResync time.Duration, options ...DynamicSharedInformerOption) DynamicSharedInformerFactory {
+	factory := &dynamicSharedInformerFactory{
+		client:             client,
+		defaultResync:      defaultResync,
+		namespace:          metav1.NamespaceAll,
+		informers:          map[schema.GroupVersionResource]informers.GenericInformer{},
+		startedInformers:   make(map[schema.GroupVersionResource]bool),
+		stoppableInformers: make(map[schema.GroupVersionResource]cache.DoneChannel),
+	}
+
+	// Apply all options
+	for _, opt := range options {
+		factory = opt(factory)
+	}
+
+	return factory
+}
+
+// ForStoppableResource returns the informer info (informer and done channel) for a given resource.
+// If the informer does not exit yet and the method returns false,
+// ForResource must be called first in order to create the informer and add it to the factory's informers slice.
+// If the informer does exist, then the DoneChannel can be used to see when the specific informer has stopped.
+// The informer is returned alongside the DoneChannel to prevent races where a stopped informer is returned.
+func (f *dynamicSharedInformerFactory) ForStoppableResource(gvr schema.GroupVersionResource) (*informers.StoppableInformerInfo, bool) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	informer, exists := f.informers[gvr]
+	if !exists {
+		return nil, false
+	}
+
+	doneCh, ok := f.stoppableInformers[gvr]
+	if !ok {
+		return nil, false
+	}
+	return &informers.StoppableInformerInfo{
+		Informer: informer,
+		Done:     doneCh,
+	}, ok
+}
 
 func (f *dynamicSharedInformerFactory) ForResource(gvr schema.GroupVersionResource) informers.GenericInformer {
 	f.lock.Lock()
@@ -81,15 +149,50 @@ func (f *dynamicSharedInformerFactory) ForResource(gvr schema.GroupVersionResour
 	return informer
 }
 
-// Start initializes all requested informers.
+func (f *dynamicSharedInformerFactory) informerStopped(informerType schema.GroupVersionResource) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	delete(f.startedInformers, informerType)
+	delete(f.informers, informerType)
+}
+
+// Start initializes all requested informers with the stop options provided, defaulting to
+// the old, non-existent stop options (only stopping via closure of stopCh).
+// It makes sure remove an informer from the list of informers and started informers when the informer is stopped
+// to prevent a race where InformerFor gives the user back a stopped informer that will never be started again.
 func (f *dynamicSharedInformerFactory) Start(stopCh <-chan struct{}) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
+	// default stopOnListError is to never stop
+	stopOnListError := func(error) bool {
+		return false
+	}
+	if f.stopOnListError != nil {
+		stopOnListError = f.stopOnListError
+	}
+	stopOptions := cache.StopOptions{
+		StopOnListError: stopOnListError,
+	}
 	for informerType, informer := range f.informers {
+		informerType := informerType
+		informer := informer
 		if !f.startedInformers[informerType] {
-			go informer.Informer().Run(stopCh)
+			infCtx, infCancel := context.WithCancel(context.TODO())
+			go func() {
+				select {
+				case <-stopCh:
+					infCancel()
+				case <-infCtx.Done():
+				}
+			}()
+			go func() {
+				defer f.informerStopped(informerType)
+				defer infCancel()
+				informer.Informer().RunWithStopOptions(infCtx, stopOptions)
+			}()
 			f.startedInformers[informerType] = true
+			f.stoppableInformers[informerType] = infCtx.Done()
 		}
 	}
 }

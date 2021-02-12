@@ -313,6 +313,7 @@ func (c *dynamicResourceClient) Get(ctx context.Context, name string, opts metav
 }
 
 func (c *dynamicResourceClient) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	//return nil, fmt.Errorf("hack error")
 	if len(c.listKind) == 0 {
 		panic(fmt.Sprintf("coding error: you must register resource to list kind for every resource you're going to LIST when creating the client.  See NewSimpleDynamicClientWithCustomListKinds or register the list into the scheme: %v out of %v", c.resource, c.client.gvrToListKind))
 	}
