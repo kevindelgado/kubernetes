@@ -128,13 +128,6 @@ type GraphBuilder struct {
 	ignoredResources map[schema.GroupResource]struct{}
 }
 
-// monitor runs a Controller with a local stop channel.
-//type monitor struct {
-//	controller cache.Controller
-//	store      cache.Store
-//}
-
-//type monitors map[schema.GroupVersionResource]*monitor
 type monitors map[schema.GroupVersionResource]cache.SharedIndexInformer
 type resourceSet map[schema.GroupVersionResource]struct{}
 

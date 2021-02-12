@@ -251,7 +251,7 @@ func (qm *QuotaMonitor) StartMonitors() {
 			}()
 		}
 	}
-	klog.Infof("QuotaMonitor started all %d monitors", len(qm.monitors))
+	klog.V(4).Infof("QuotaMonitor started all %d monitors", len(qm.monitors))
 }
 
 // IsSynced returns true if any monitors exist AND all those monitors'
@@ -274,18 +274,6 @@ func (qm *QuotaMonitor) IsSynced() bool {
 			return false
 		}
 	}
-	//for resource := range qm.monitors {
-	//	if shared, err := qm.informerFactory.ForResource(resource); err != nil {
-	//		klog.V(4).Infof("QuotaMonitor unable to use a shared informer for resource %q: %v", resource.String(), err)
-	//		return false
-	//	} else {
-	//		if !shared.Informer().HasSynced() {
-	//			klog.V(4).Infof("quota monitor not synced: %v", resource)
-	//			return false
-	//		}
-
-	//	}
-	//}
 	return true
 }
 
