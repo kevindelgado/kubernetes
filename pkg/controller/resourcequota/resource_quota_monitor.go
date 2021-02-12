@@ -23,7 +23,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/clock"
@@ -116,24 +116,9 @@ func NewMonitor(informersStarted <-chan struct{}, informerFactory informerfactor
 	}
 }
 
-// monitor runs a Controller with a local stop channel.
-type monitor struct {
-	controller cache.Controller
+type monitors map[schema.GroupVersionResource]cache.SharedIndexInformer
 
-	// stopCh stops Controller. If stopCh is nil, the monitor is considered to be
-	// not yet started.
-	stopCh chan struct{}
-}
-
-// Run is intended to be called in a goroutine. Multiple calls of this is an
-// error.
-func (m *monitor) Run() {
-	m.controller.Run(m.stopCh)
-}
-
-type monitors map[schema.GroupVersionResource]*monitor
-
-func (qm *QuotaMonitor) controllerFor(resource schema.GroupVersionResource) (cache.Controller, error) {
+func (qm *QuotaMonitor) informerFor(resource schema.GroupVersionResource) (cache.SharedIndexInformer, error) {
 	handlers := cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			// TODO: leaky abstraction!  live w/ it for now, but should pass down an update filter func.
@@ -172,11 +157,11 @@ func (qm *QuotaMonitor) controllerFor(resource schema.GroupVersionResource) (cac
 			qm.resourceChanges.Add(event)
 		},
 	}
-	shared, err := qm.informerFactory.ForResource(resource)
+	generic, err := qm.informerFactory.ForResource(resource)
 	if err == nil {
 		klog.V(4).Infof("QuotaMonitor using a shared informer for resource %q", resource.String())
-		shared.Informer().AddEventHandlerWithResyncPeriod(handlers, qm.resyncPeriod())
-		return shared.Informer().GetController(), nil
+		generic.Informer().AddEventHandlerWithResyncPeriod(handlers, qm.resyncPeriod())
+		return generic.Informer(), nil
 	}
 	klog.V(4).Infof("QuotaMonitor unable to use a shared informer for resource %q: %v", resource.String(), err)
 
@@ -213,7 +198,7 @@ func (qm *QuotaMonitor) SyncMonitors(resources map[schema.GroupVersionResource]s
 			kept++
 			continue
 		}
-		c, err := qm.controllerFor(resource)
+		informer, err := qm.informerFor(resource)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("couldn't start monitor for resource %q: %v", resource, err))
 			continue
@@ -229,17 +214,11 @@ func (qm *QuotaMonitor) SyncMonitors(resources map[schema.GroupVersionResource]s
 			klog.Infof("QuotaMonitor created object count evaluator for %s", resource.GroupResource())
 		}
 
-		// track the monitor
-		current[resource] = &monitor{controller: c}
+		// track the informer
+		current[resource] = informer
 		added++
 	}
 	qm.monitors = current
-
-	for _, monitor := range toRemove {
-		if monitor.stopCh != nil {
-			close(monitor.stopCh)
-		}
-	}
 
 	klog.V(4).Infof("quota synced monitors; added %d, kept %d, removed %d", added, kept, len(toRemove))
 	// NewAggregate returns nil if errs is 0-length
@@ -252,8 +231,8 @@ func (qm *QuotaMonitor) SyncMonitors(resources map[schema.GroupVersionResource]s
 // If called before Run, StartMonitors does nothing (as there is no stop channel
 // to support monitor/informer execution).
 func (qm *QuotaMonitor) StartMonitors() {
-	qm.monitorLock.Lock()
-	defer qm.monitorLock.Unlock()
+	qm.monitorLock.RLock()
+	defer qm.monitorLock.RUnlock()
 
 	if !qm.running {
 		return
@@ -263,17 +242,18 @@ func (qm *QuotaMonitor) StartMonitors() {
 	// that they don't get unexpected events on their work queues.
 	<-qm.informersStarted
 
-	monitors := qm.monitors
-	started := 0
-	for _, monitor := range monitors {
-		if monitor.stopCh == nil {
-			monitor.stopCh = make(chan struct{})
-			qm.informerFactory.Start(qm.stopCh)
-			go monitor.Run()
-			started++
+	qm.informerFactory.Start(qm.stopCh)
+	for gvr := range qm.monitors {
+		if info := qm.informerFactory.ForStoppableResource(gvr); info != nil {
+			go func(gvr schema.GroupVersionResource) {
+				<-info.Done
+				qm.monitorLock.Lock()
+				defer qm.monitorLock.Unlock()
+				delete(qm.monitors, gvr)
+			}(gvr)
 		}
 	}
-	klog.V(4).Infof("QuotaMonitor started %d new monitors, %d currently running", started, len(monitors))
+	klog.V(4).Infof("QuotaMonitor started all %d monitors", len(qm.monitors))
 }
 
 // IsSynced returns true if any monitors exist AND all those monitors'
@@ -290,7 +270,8 @@ func (qm *QuotaMonitor) IsSynced() bool {
 	}
 
 	for resource, monitor := range qm.monitors {
-		if !monitor.controller.HasSynced() {
+		if !monitor.HasSynced() {
+
 			klog.V(4).Infof("quota monitor not synced: %v", resource)
 			return false
 		}
@@ -314,19 +295,6 @@ func (qm *QuotaMonitor) Run(stopCh <-chan struct{}) {
 	// closed.
 	qm.StartMonitors()
 	wait.Until(qm.runProcessResourceChanges, 1*time.Second, stopCh)
-
-	// Stop any running monitors.
-	qm.monitorLock.Lock()
-	defer qm.monitorLock.Unlock()
-	monitors := qm.monitors
-	stopped := 0
-	for _, monitor := range monitors {
-		if monitor.stopCh != nil {
-			stopped++
-			close(monitor.stopCh)
-		}
-	}
-	klog.Infof("QuotaMonitor stopped %d of %d monitors", stopped, len(monitors))
 }
 
 func (qm *QuotaMonitor) runProcessResourceChanges() {
