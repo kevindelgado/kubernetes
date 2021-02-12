@@ -36,6 +36,7 @@ go_test(
         "//staging/src/k8s.io/client-go/tools/cache:go_default_library",
         "//staging/src/k8s.io/controller-manager/pkg/informerfactory:go_default_library",
         "//test/integration:go_default_library",
+        "//test/integration/util:go_default_library",
         "//test/integration/framework:go_default_library",
         "//vendor/k8s.io/utils/pointer:go_default_library",
     ],
