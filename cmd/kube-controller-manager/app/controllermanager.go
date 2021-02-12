@@ -160,8 +160,10 @@ controller, and serviceaccounts controller.`,
 }
 
 // ResyncPeriod returns a function which generates a duration each time it is
-// invoked; this is so that multiple controllers don't get into lock-step and all
-// hammer the apiserver with list requests simultaneously.
+// invoked. It returns a function because it is stored on the ControllerContext
+// and generates a random duration so that multiple controllers don't get into
+// lock-step and all hammer the apiserver with list requests simultaneously.
+// If you just need to use it once, immediately invoke it.
 func ResyncPeriod(c *config.CompletedConfig) func() time.Duration {
 	return func() time.Duration {
 		factor := rand.Float64() + 1
@@ -488,8 +490,9 @@ func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clien
 	versionedClient := rootClientBuilder.ClientOrDie("shared-informers")
 	sharedInformers := informers.NewSharedInformerFactory(versionedClient, ResyncPeriod(s)())
 
+	stopOnError := func(error) bool { return true }
 	metadataClient := metadata.NewForConfigOrDie(rootClientBuilder.ConfigOrDie("metadata-informers"))
-	metadataInformers := metadatainformer.NewSharedInformerFactory(metadataClient, ResyncPeriod(s)())
+	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, ResyncPeriod(s)(), metadatainformer.WithStopOnError(stopOnError))
 
 	// If apiserver is not running we should wait for some time and fail only then. This is particularly
 	// important when we start apiserver and controller manager at the same time.
