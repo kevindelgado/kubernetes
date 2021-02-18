@@ -73,6 +73,7 @@ import (
 	"k8s.io/apiserver/pkg/features"
 	"k8s.io/apiserver/pkg/registry/generic"
 	genericregistry "k8s.io/apiserver/pkg/registry/generic/registry"
+	"k8s.io/apiserver/pkg/registry/rest"
 	genericfilters "k8s.io/apiserver/pkg/server/filters"
 	"k8s.io/apiserver/pkg/storage/storagebackend"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
@@ -859,13 +860,10 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 		}
 		if utilfeature.DefaultFeatureGate.Enabled(features.ServerSideApply) {
 			reqScope := *requestScopes[v.Name]
-			reqScope.FieldManager, err = fieldmanager.NewDefaultCRDFieldManager(
+			reqScope, err = scopeWithFieldManager(
 				typeConverter,
-				reqScope.Convertor,
-				reqScope.Defaulter,
-				reqScope.Creater,
-				reqScope.Kind,
-				reqScope.HubGroupVersion,
+				reqScope,
+				storages[v.Name].CustomResource,
 				false,
 			)
 			if err != nil {
@@ -894,20 +892,6 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 		// override status subresource values
 		// shallow copy
 		statusScope := *requestScopes[v.Name]
-		if utilfeature.DefaultFeatureGate.Enabled(features.ServerSideApply) {
-			statusScope.FieldManager, err = fieldmanager.NewDefaultCRDFieldManager(
-				typeConverter,
-				statusScope.Convertor,
-				statusScope.Defaulter,
-				statusScope.Creater,
-				statusScope.Kind,
-				statusScope.HubGroupVersion,
-				true,
-			)
-			if err != nil {
-				return nil, err
-			}
-		}
 		statusScope.Subresource = "status"
 		statusScope.Namer = handlers.ContextBasedNaming{
 			SelfLinker:         meta.NewAccessor(),
@@ -915,6 +899,19 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 			SelfLinkPathPrefix: selfLinkPrefix,
 			SelfLinkPathSuffix: "/status",
 		}
+
+		if utilfeature.DefaultFeatureGate.Enabled(features.ServerSideApply) {
+			statusScope, err = scopeWithFieldManager(
+				typeConverter,
+				statusScope,
+				storages[v.Name].Status,
+				true,
+			)
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		statusScopes[v.Name] = &statusScope
 
 		if v.Deprecated {
@@ -950,6 +947,26 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 	r.customStorage.Store(storageMap2)
 
 	return ret, nil
+}
+
+func scopeWithFieldManager(typeConverter fieldmanager.TypeConverter, reqScope handlers.RequestScope, storage rest.ResetFieldsStrategy, ignoreManagedFieldsFromRequestObject bool) (handlers.RequestScope, error) {
+	resetFields := storage.GetResetFields()
+
+	fieldManager, err := fieldmanager.NewDefaultCRDFieldManager(
+		typeConverter,
+		reqScope.Convertor,
+		reqScope.Defaulter,
+		reqScope.Creater,
+		reqScope.Kind,
+		reqScope.HubGroupVersion,
+		ignoreManagedFieldsFromRequestObject,
+		resetFields,
+	)
+	if err != nil {
+		return handlers.RequestScope{}, err
+	}
+	reqScope.FieldManager = fieldManager
+	return reqScope, nil
 }
 
 func defaultDeprecationWarning(deprecatedVersion string, crd apiextensionsv1.CustomResourceDefinitionSpec) string {

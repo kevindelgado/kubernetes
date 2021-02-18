@@ -49,6 +49,7 @@ import (
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/kubelet/client"
 	proxyutil "k8s.io/kubernetes/pkg/proxy/util"
+	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 )
 
 // podStrategy implements behavior for Pods
@@ -64,6 +65,23 @@ var Strategy = podStrategy{legacyscheme.Scheme, names.SimpleNameGenerator}
 // NamespaceScoped is true for pods.
 func (podStrategy) NamespaceScoped() bool {
 	return true
+}
+
+// GetResetFields returns the set of fields that get reset by the strategy
+// and should not be modified by the user.
+func (podStrategy) GetResetFields() map[fieldpath.APIVersion]*fieldpath.Set {
+	fields := map[fieldpath.APIVersion]*fieldpath.Set{
+		"v1": fieldpath.NewSet(
+			fieldpath.MakePathOrDie("status"),
+			// TODO: add fields reset by podutil.DropDisabledPodFields
+		),
+	}
+
+	// For more versions, loop here
+	// This should not be done at every call as currently the result can not change at runtime
+	podutil.AddDisabledFieldsTo(fields["v1"])
+
+	return fields
 }
 
 // PrepareForCreate clears fields that are not allowed to be set by end users on creation.
@@ -154,6 +172,18 @@ type podStatusStrategy struct {
 
 // StatusStrategy wraps and exports the used podStrategy for the storage package.
 var StatusStrategy = podStatusStrategy{Strategy}
+
+// GetResetFields returns the set of fields that get reset by the strategy
+// and should not be modified by the user.
+func (podStatusStrategy) GetResetFields() map[fieldpath.APIVersion]*fieldpath.Set {
+	return map[fieldpath.APIVersion]*fieldpath.Set{
+		"v1": fieldpath.NewSet(
+			fieldpath.MakePathOrDie("spec"),
+			fieldpath.MakePathOrDie("metadata", "deletionTimestamp"),
+			fieldpath.MakePathOrDie("metadata", "ownerReferences"),
+		),
+	}
+}
 
 func (podStatusStrategy) PrepareForUpdate(ctx context.Context, obj, old runtime.Object) {
 	newPod := obj.(*api.Pod)

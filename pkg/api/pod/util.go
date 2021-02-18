@@ -29,6 +29,7 @@ import (
 	"k8s.io/kubernetes/pkg/apis/core/validation"
 	apivalidation "k8s.io/kubernetes/pkg/apis/core/validation"
 	"k8s.io/kubernetes/pkg/features"
+	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 )
 
 // ContainerType signifies container type
@@ -393,6 +394,13 @@ func DropDisabledTemplateFields(podTemplate, oldPodTemplate *api.PodTemplateSpec
 	dropDisabledFields(podSpec, podAnnotations, oldPodSpec, oldPodAnnotations)
 }
 
+// AddDisabledTemplateFieldsTo the provided set of resetFields
+// This should be called with the resetFields for all resources containing a PodTemplate
+// To add the fields at the right location, pass a prefixed fieldset
+func AddDisabledTemplateFieldsTo(resetFields *fieldpath.Set) {
+	addDisabledFieldsTo(resetFields)
+}
+
 // DropDisabledPodFields removes disabled fields from the pod metadata and spec.
 // This should be called from PrepareForCreate/PrepareForUpdate for all resources containing a Pod
 func DropDisabledPodFields(pod, oldPod *api.Pod) {
@@ -418,6 +426,13 @@ func DropDisabledPodFields(pod, oldPod *api.Pod) {
 	dropPodStatusDisabledFields(podStatus, oldPodStatus)
 }
 
+// AddDisabledFieldsTo the provided set of resetFields
+// This should be called with the resetFields for all resources containing a Pod
+func AddDisabledFieldsTo(resetFields *fieldpath.Set) {
+	addDisabledStatusFieldsTo(resetFields)
+	addDisabledFieldsTo(resetFields)
+}
+
 // dropPodStatusDisabledFields removes disabled fields from the pod status
 func dropPodStatusDisabledFields(podStatus *api.PodStatus, oldPodStatus *api.PodStatus) {
 	// trim PodIPs down to only one entry (non dual stack).
@@ -426,6 +441,12 @@ func dropPodStatusDisabledFields(podStatus *api.PodStatus, oldPodStatus *api.Pod
 		if len(podStatus.PodIPs) != 0 {
 			podStatus.PodIPs = podStatus.PodIPs[0:1]
 		}
+	}
+}
+
+func addDisabledStatusFieldsTo(resetFields *fieldpath.Set) {
+	if !utilfeature.DefaultFeatureGate.Enabled(features.IPv6DualStack) {
+		resetFields.Insert(fieldpath.MakePathOrDie("status", "podIPs"))
 	}
 }
 
@@ -510,6 +531,27 @@ func dropDisabledFields(
 		podSpec.SetHostnameAsFQDN = nil
 	}
 
+}
+
+// addDisabledFields removes disabled fields from the pod metadata and spec.
+func addDisabledFieldsTo(resetFields *fieldpath.Set) {
+	// TODO: add all the fields from podutil.DropDisabledPodFields (a lot)
+
+	// TODO: how to handle cases like this
+	if !utilfeature.DefaultFeatureGate.Enabled(features.AppArmor) /* && !appArmorInUse(oldPodAnnotations) */ {
+		// for k := range podAnnotations {
+		// 	if strings.HasPrefix(k, v1.AppArmorBetaContainerAnnotationKeyPrefix) {
+		// 		delete(podAnnotations, k)
+		// 	}
+		// }
+	}
+
+	if !utilfeature.DefaultFeatureGate.Enabled(features.Sysctls) {
+		// if podSpec.SecurityContext != nil {
+		// 	podSpec.SecurityContext.Sysctls = nil
+		// }
+		resetFields.Insert(fieldpath.MakePathOrDie("spec", "securityContext", "sysctls"))
+	}
 }
 
 // dropDisabledRunAsGroupField removes disabled fields from PodSpec related

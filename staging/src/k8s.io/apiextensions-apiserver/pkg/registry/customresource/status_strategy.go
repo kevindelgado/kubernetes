@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 )
 
 type statusStrategy struct {
@@ -30,6 +31,20 @@ type statusStrategy struct {
 
 func NewStatusStrategy(strategy customResourceStrategy) statusStrategy {
 	return statusStrategy{strategy}
+}
+
+// GetResetFields returns the set of fields that get reset by the strategy
+// and should not be modified by the user.
+func (a statusStrategy) GetResetFields() map[fieldpath.APIVersion]*fieldpath.Set {
+	fields := map[fieldpath.APIVersion]*fieldpath.Set{
+		fieldpath.APIVersion(a.customResourceStrategy.kind.GroupVersion().String()): fieldpath.NewSet(
+			// TODO: this is not correct, we might need a way to specify an inverse,
+			// like ignore everything but status.
+			fieldpath.MakePathOrDie("spec"),
+		),
+	}
+
+	return fields
 }
 
 func (a statusStrategy) PrepareForUpdate(ctx context.Context, obj, old runtime.Object) {
