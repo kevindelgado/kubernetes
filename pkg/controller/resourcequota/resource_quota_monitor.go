@@ -244,7 +244,7 @@ func (qm *QuotaMonitor) StartMonitors() {
 
 	qm.informerFactory.Start(qm.stopCh)
 	for gvr := range qm.monitors {
-		if info, ok := qm.informerFactory.ForStoppableResource(gvr); ok {
+		if info := qm.informerFactory.ForStoppableResource(gvr); info != nil {
 			go func() {
 				<-info.Done
 				delete(qm.monitors, gvr)
