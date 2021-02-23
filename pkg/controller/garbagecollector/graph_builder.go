@@ -188,7 +188,8 @@ func (gb *GraphBuilder) filterStoppedResources(set resourceSet) {
 		delete(set, resource)
 	}
 	// reset stoppedResources so that all stopped resources
-	// are re-installed on the next sync cycle.
+	// that have been re-installed in the same sync cycle
+	// will be restarted on the next sync cycle.
 	gb.stoppedResources = resourceSet{}
 }
 
