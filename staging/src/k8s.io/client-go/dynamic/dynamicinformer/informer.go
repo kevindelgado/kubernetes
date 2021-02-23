@@ -109,27 +109,23 @@ func NewDynamicSharedInformerFactoryWithOptions(client dynamic.Interface, defaul
 }
 
 // ForStoppableResource returns the informer info (informer and done channel) for a given resource.
-// If the informer does not exit yet and the method returns false,
+// If the informer has not been started yet, the method returns nil.
 // ForResource must be called first in order to create the informer and add it to the factory's informers slice.
 // If the informer does exist, then the DoneChannel can be used to see when the specific informer has stopped.
-// The informer is returned alongside the DoneChannel to prevent races where a stopped informer is returned.
-func (f *dynamicSharedInformerFactory) ForStoppableResource(gvr schema.GroupVersionResource) (*informers.StoppableInformerInfo, bool) {
+// The informer must be returned alongside the DoneChannel to prevent races where a stopped informer is returned.
+func (f *dynamicSharedInformerFactory) ForStoppableResource(gvr schema.GroupVersionResource) *informers.StoppableInformerInfo {
+	informer := f.ForResource(gvr)
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
-	informer, exists := f.informers[gvr]
-	if !exists {
-		return nil, false
-	}
-
 	doneCh, ok := f.startedInformers[gvr]
 	if !ok {
-		return nil, false
+		return nil
 	}
 	return &informers.StoppableInformerInfo{
 		Informer: informer,
 		Done:     doneCh,
-	}, ok
+	}
 }
 
 func (f *dynamicSharedInformerFactory) ForResource(gvr schema.GroupVersionResource) informers.GenericInformer {

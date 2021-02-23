@@ -239,7 +239,7 @@ var sharedInformerFactoryInterface = `
 // API group versions.
 type SharedInformerFactory interface {
 	{{.informerFactoryInterface|raw}}
-	ForStoppableResource(resource {{.schemaGroupVersionResource|raw}}) (*StoppableInformerInfo, bool)
+	ForStoppableResource(resource {{.schemaGroupVersionResource|raw}}) *StoppableInformerInfo
 	ForResource(resource {{.schemaGroupVersionResource|raw}}) (GenericInformer, error)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
 

@@ -202,7 +202,7 @@ var forStoppableResource = `
 // is only used with builtin types it is not expected to ever be called
 // (because StartWithStopOptions is never used as builtin resources are never uninstalled from the cluster).
 // Dynamicinformer and metadatainformer facotries actually implement ForStoppableResource.
-func (f *sharedInformerFactory) ForStoppableResource(gvr {{.schemaGroupVersionResource|raw}}) (*StoppableInformerInfo, bool) {
-	return nil, false
+func (f *sharedInformerFactory) ForStoppableResource(gvr {{.schemaGroupVersionResource|raw}}) *StoppableInformerInfo {
+	return nil
 }
 `

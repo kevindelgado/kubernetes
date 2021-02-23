@@ -24,7 +24,7 @@ import (
 
 // InformerFactory creates informers for each group version resource.
 type InformerFactory interface {
-	ForStoppableResource(resource schema.GroupVersionResource) (*informers.StoppableInformerInfo, bool)
+	ForStoppableResource(resource schema.GroupVersionResource) *informers.StoppableInformerInfo
 	ForResource(resource schema.GroupVersionResource) (informers.GenericInformer, error)
 	Start(stopCh <-chan struct{})
 }
@@ -34,12 +34,12 @@ type informerFactory struct {
 	metadataInformerFactory metadatainformer.SharedInformerFactory
 }
 
-func (i *informerFactory) ForStoppableResource(resource schema.GroupVersionResource) (*informers.StoppableInformerInfo, bool) {
-	info, ok := i.typedInformerFactory.ForStoppableResource(resource)
-	if !ok {
+func (i *informerFactory) ForStoppableResource(resource schema.GroupVersionResource) *informers.StoppableInformerInfo {
+	info := i.typedInformerFactory.ForStoppableResource(resource)
+	if info == nil {
 		return i.metadataInformerFactory.ForStoppableResource(resource)
 	}
-	return info, ok
+	return info
 }
 
 func (i *informerFactory) ForResource(resource schema.GroupVersionResource) (informers.GenericInformer, error) {

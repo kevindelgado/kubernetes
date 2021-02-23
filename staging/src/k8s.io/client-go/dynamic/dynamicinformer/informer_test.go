@@ -289,8 +289,8 @@ func TestSpecificInformerStopOnError(t *testing.T) {
 		_ = target.ForResource(gvr)
 		infCtx, _ := context.WithCancel(ctx)
 		target.Start(infCtx.Done())
-		info, ok := target.ForStoppableResource(gvr)
-		if !ok {
+		info := target.ForStoppableResource(gvr)
+		if info == nil {
 			t.Errorf("Unable to retrieve done channel for gvr")
 		}
 

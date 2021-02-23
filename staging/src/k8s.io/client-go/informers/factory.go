@@ -186,7 +186,7 @@ func (f *sharedInformerFactory) InformerFor(obj runtime.Object, newFunc internal
 // API group versions.
 type SharedInformerFactory interface {
 	internalinterfaces.SharedInformerFactory
-	ForStoppableResource(resource schema.GroupVersionResource) (*StoppableInformerInfo, bool)
+	ForStoppableResource(resource schema.GroupVersionResource) *StoppableInformerInfo
 	ForResource(resource schema.GroupVersionResource) (GenericInformer, error)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
 
