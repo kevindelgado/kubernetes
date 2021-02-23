@@ -51,7 +51,7 @@ type metadataSharedInformerFactory struct {
 
 var _ SharedInformerFactory = &metadataSharedInformerFactory{}
 
-// WithStopOnError sets the stopOnListErrFunc that is added to the stop options
+// WithStopOnError sets the stopOnErrorFunc that is added to the stop options
 // when calling StartWithStopOptions.
 // This method results in every informer in this factory getting the same stop options.
 func WithStopOnError(stopOnError cache.StopOnErrorFunc) SharedInformerOption {

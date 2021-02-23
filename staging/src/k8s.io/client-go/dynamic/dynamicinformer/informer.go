@@ -52,7 +52,7 @@ type dynamicSharedInformerFactory struct {
 
 var _ DynamicSharedInformerFactory = &dynamicSharedInformerFactory{}
 
-// WithStopOnError sets the onListErrFunc that is added to the stop options
+// WithStopOnError sets the stopOnErrorFunc that is added to the stop options
 // when calling StartWithStopOptions.
 // This function results in every informer in this factory getting the same stop options.
 func WithStopOnError(stopOnError cache.StopOnErrorFunc) DynamicSharedInformerOption {
