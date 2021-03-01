@@ -346,3 +346,17 @@ type StorageVersionProvider interface {
 type ResetFieldsStrategy interface {
 	GetResetFields() map[fieldpath.APIVersion]*fieldpath.Set
 }
+
+// CreateUpdateResetFieldsStrategy is a union of RESTCreateUpdateStrategy
+// and ResetFieldsStrategy.
+type CreateUpdateResetFieldsStrategy interface {
+	RESTCreateUpdateStrategy
+	ResetFieldsStrategy
+}
+
+// UpdateResetFieldsStrategy is a union of RESTUpdateStrategy
+// and ResetFieldsStrategy.
+type UpdateResetFieldsStrategy interface {
+	RESTUpdateStrategy
+	ResetFieldsStrategy
+}

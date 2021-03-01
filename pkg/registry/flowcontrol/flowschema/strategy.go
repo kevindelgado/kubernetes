@@ -50,6 +50,9 @@ func (flowSchemaStrategy) GetResetFields() map[fieldpath.APIVersion]*fieldpath.S
 		"flowcontrol.apiserver.k8s.io/v1alpha1": fieldpath.NewSet(
 			fieldpath.MakePathOrDie("status"),
 		),
+		"flowcontrol.apiserver.k8s.io/v1beta1": fieldpath.NewSet(
+			fieldpath.MakePathOrDie("status"),
+		),
 	}
 
 	return fields
@@ -109,8 +112,12 @@ var StatusStrategy = flowSchemaStatusStrategy{Strategy}
 func (flowSchemaStatusStrategy) GetResetFields() map[fieldpath.APIVersion]*fieldpath.Set {
 	fields := map[fieldpath.APIVersion]*fieldpath.Set{
 		"flowcontrol.apiserver.k8s.io/v1alpha1": fieldpath.NewSet(
-			fieldpath.MakePathOrDie("spec"),
 			fieldpath.MakePathOrDie("metadata"),
+			fieldpath.MakePathOrDie("spec"),
+		),
+		"flowcontrol.apiserver.k8s.io/v1beta1": fieldpath.NewSet(
+			fieldpath.MakePathOrDie("metadata"),
+			fieldpath.MakePathOrDie("spec"),
 		),
 	}
 
