@@ -7,6 +7,7 @@ go_test(
         "apply_crd_test.go",
         "apply_test.go",
         "main_test.go",
+        "reset_fields_test.go",
         "status_test.go",
     ],
     tags = [
