@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	goopenapispec "github.com/go-openapi/spec"
+	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 
 	apiextensionshelpers "k8s.io/apiextensions-apiserver/pkg/apihelpers"
 	apiextensionsinternal "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
@@ -950,7 +952,13 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 }
 
 func scopeWithFieldManager(typeConverter fieldmanager.TypeConverter, reqScope handlers.RequestScope, storage rest.ResetFieldsStrategy, ignoreManagedFieldsFromRequestObject bool) (handlers.RequestScope, error) {
-	resetFields := storage.GetResetFields()
+	resetFields := map[fieldpath.APIVersion]*fieldpath.Set{}
+	// storage is an interface, in the event it holds a nil value
+	// storage itself will not equal nil.
+	// We must check that the value if storage is not nil in order to avoid a panic.
+	if reflect.ValueOf(storage).Kind() == reflect.Ptr && !reflect.ValueOf(storage).IsNil() {
+		resetFields = storage.GetResetFields()
+	}
 
 	fieldManager, err := fieldmanager.NewDefaultCRDFieldManager(
 		typeConverter,

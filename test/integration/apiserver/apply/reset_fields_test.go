@@ -85,21 +85,11 @@ func TestApplyResetFields(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Run(mapping.Resource.String(), func(t *testing.T) {
-				// if _, ok := ignoreList[mapping.Resource]; ok {
-				// 	t.Skip()
-				// }
-
-				// TODO: fix this test for customresourcedefinitions
-				// CRD status gets updated by other actors which makes those own the conditions field,
-				// which causes this test to get a conflict.
-				if mapping.Resource.Resource == "customresourcedefinitions" {
-					t.Skip()
-				}
-
 				status, ok := statusData[mapping.Resource]
 				if !ok {
 					status = statusDefault
 				}
+
 				newResource, ok := createData[mapping.Resource]
 				if !ok {
 					t.Fatalf("no test data for %s.  Please add a test for your new type to etcd.GetEtcdStorageData().", mapping.Resource)
