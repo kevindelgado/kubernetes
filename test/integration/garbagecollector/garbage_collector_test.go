@@ -1128,6 +1128,7 @@ func TestCRDDeletionCascading(t *testing.T) {
 
 	t.Logf("First pass CRD cascading deletion")
 	definition, resourceClient := util.CreateRandomCustomResourceDefinition(t, apiExtensionClient, dynamicClient, ns.Name)
+	t.Logf("created CRD pass 1 jumping into helper")
 	testCRDDeletion(t, ctx, ns, definition, resourceClient)
 
 	t.Logf("Second pass CRD cascading deletion")
@@ -1137,6 +1138,7 @@ func TestCRDDeletionCascading(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create CustomResourceDefinition: %v", err)
 	}
+	t.Logf("created CRD pass 2 jumping into helper")
 	testCRDDeletion(t, ctx, ns, definition, resourceClient)
 }
 
@@ -1162,11 +1164,13 @@ func testCRDDeletion(t *testing.T, ctx *testContext, ns *v1.Namespace, definitio
 	t.Logf("created dependent %q", dependent.GetName())
 
 	time.Sleep(ctx.syncPeriod + 5*time.Second)
+	t.Logf("out of sleep")
 
 	// Delete the definition, which should cascade to the owner and ultimately its dependents.
 	if err := apiextensionstestserver.DeleteCustomResourceDefinition(definition, apiExtensionClient); err != nil {
 		t.Fatalf("failed to delete %q: %v", definition.Name, err)
 	}
+	t.Logf("deleted CRD")
 
 	// Ensure the owner is deleted.
 	if err := wait.Poll(1*time.Second, 60*time.Second, func() (bool, error) {
@@ -1175,6 +1179,7 @@ func testCRDDeletion(t *testing.T, ctx *testContext, ns *v1.Namespace, definitio
 	}); err != nil {
 		t.Fatalf("failed waiting for owner %q to be deleted", owner.GetName())
 	}
+	t.Logf("done owner deletion check")
 
 	// Ensure the dependent is deleted.
 	if err := wait.Poll(1*time.Second, 60*time.Second, func() (bool, error) {
@@ -1183,4 +1188,5 @@ func testCRDDeletion(t *testing.T, ctx *testContext, ns *v1.Namespace, definitio
 	}); err != nil {
 		t.Fatalf("failed waiting for dependent %q (owned by %q) to be deleted", dependent.GetName(), owner.GetName())
 	}
+	t.Logf("done dependent deletion check")
 }

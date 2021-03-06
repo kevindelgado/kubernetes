@@ -217,6 +217,7 @@ var internalPackages = []string{"client-go/tools/cache/"}
 // RunWithStopOptions will exit when one of the stopOptions conditions is met.
 func (r *Reflector) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
 	klog.V(2).Infof("Starting reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
+	klog.Warningf("Starting reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
 	lwCtx, lwCancel := context.WithCancel(ctx)
 	wait.BackoffUntil(func() {
 		if err := r.ListAndWatch(lwCtx.Done()); err != nil {
@@ -225,12 +226,14 @@ func (r *Reflector) RunWithStopOptions(ctx context.Context, stopOptions StopOpti
 			if onListErr := stopOptions.StopOnError; onListErr != nil {
 				if onListErr(err) {
 					klog.V(2).Infof("Closing listAndWatch for %s with error from reflector %s", r.expectedTypeName, r.name)
+					klog.Warningf("Closing listAndWatch for %s with error from reflector %s", r.expectedTypeName, r.name)
 					lwCancel()
 				}
 			}
 		}
 	}, r.backoffManager, true, lwCtx.Done())
 	klog.V(2).Infof("Stopping reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
+	klog.Warningf("Stopping reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
 }
 
 // Run calls RunWithStopOptions and only exits when stopCh is closed

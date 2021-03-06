@@ -401,8 +401,10 @@ func (r *crdHandler) serveResource(w http.ResponseWriter, req *http.Request, req
 		// delay in some CI environments.  Two seconds looks long enough and reasonably short for hot retriers.
 		justCreated := time.Since(apiextensionshelpers.FindCRDCondition(crd, apiextensionsv1.Established).LastTransitionTime.Time) < 2*time.Second
 		if justCreated {
+			klog.Warningf("YES sleep in create handler, just going into terminate check")
 			time.Sleep(2 * time.Second)
 		}
+		klog.Warningf("DONE sleep in create handler, just going into terminate check")
 		if terminating {
 			err := apierrors.NewMethodNotSupported(schema.GroupResource{Group: requestInfo.APIGroup, Resource: requestInfo.Resource}, requestInfo.Verb)
 			err.ErrStatus.Message = fmt.Sprintf("%v not allowed while custom resource definition is terminating", requestInfo.Verb)

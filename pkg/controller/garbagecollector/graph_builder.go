@@ -185,6 +185,7 @@ func (gb *GraphBuilder) filterStoppedResources(set resourceSet) {
 	for resource := range gb.stoppedResources {
 		// filter resource from the resource set used by Sync
 		// so that it's deletion is recognized on the first Sync cycle.
+		klog.Warningf("filtering resource %v", resource)
 		delete(set, resource)
 	}
 	// reset stoppedResources so that all stopped resources
@@ -272,9 +273,11 @@ func (gb *GraphBuilder) startMonitors() {
 
 	gb.sharedInformers.Start(gb.stopCh)
 	for gvr := range gb.monitors {
+		gvr := gvr
 		if info := gb.sharedInformers.ForStoppableResource(gvr); info != nil {
 			go func() {
 				<-info.Done
+				klog.Warningf("informer stopped for %v, adding it to stopped resources", gvr)
 				gb.addStoppedResource(gvr)
 			}()
 		}
