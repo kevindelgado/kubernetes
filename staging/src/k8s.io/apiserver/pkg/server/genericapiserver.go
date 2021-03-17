@@ -140,7 +140,7 @@ type GenericAPIServer struct {
 	skipOpenAPIInstallation bool
 
 	// OpenAPIVersionedService controls the /openapi/v2 endpoint, and can be used to update the served spec.
-	// It is set during PrepareRun.
+	// It is set during PrepareRun if `openAPIConfig` is non-nil unless `skipOpenAPIInstallation` is true.
 	OpenAPIVersionedService *handler.OpenAPIService
 
 	// StaticOpenAPISpec is the spec derived from the restful container endpoints.
@@ -295,20 +295,10 @@ type preparedGenericAPIServer struct {
 func (s *GenericAPIServer) PrepareRun() preparedGenericAPIServer {
 	s.delegationTarget.PrepareRun()
 
-	if s.openAPIConfig != nil {
-		if s.skipOpenAPIInstallation {
-			// we still need to set s.StaticOPenAPISpec even if
-			// we're not installing the openAPI handler
-			spec, err := routes.BuildAndPruneOpenAPISpec(s.Handler.GoRestfulContainer.RegisteredWebServices(), s.openAPIConfig)
-			if err != nil {
-				klog.Fatalf("Failed to build open api spec for root: %v", err)
-			}
-			s.StaticOpenAPISpec = spec
-		} else {
-			s.OpenAPIVersionedService, s.StaticOpenAPISpec = routes.OpenAPI{
-				Config: s.openAPIConfig,
-			}.Install(s.Handler.GoRestfulContainer, s.Handler.NonGoRestfulMux)
-		}
+	if s.openAPIConfig != nil && !s.skipOpenAPIInstallation {
+		s.OpenAPIVersionedService, s.StaticOpenAPISpec = routes.OpenAPI{
+			Config: s.openAPIConfig,
+		}.Install(s.Handler.GoRestfulContainer, s.Handler.NonGoRestfulMux)
 	}
 
 	s.installHealthz()
