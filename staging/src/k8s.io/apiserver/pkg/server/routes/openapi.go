@@ -34,11 +34,11 @@ type OpenAPI struct {
 
 // Install adds the SwaggerUI webservice to the given mux.
 func (oa OpenAPI) Install(c *restful.Container, mux *mux.PathRecorderMux) (*handler.OpenAPIService, *spec.Swagger) {
-	spec, err := builder.BuildOpenAPISpec(c.RegisteredWebServices(), oa.Config)
+	spec, err := BuildAndPruneOpenAPISpec(c.RegisteredWebServices(), oa.Config)
 	if err != nil {
 		klog.Fatalf("Failed to build open api spec for root: %v", err)
 	}
-	spec.Definitions = handler.PruneDefaults(spec.Definitions)
+
 	openAPIVersionedService, err := handler.NewOpenAPIService(spec)
 	if err != nil {
 		klog.Fatalf("Failed to create OpenAPIService: %v", err)
@@ -50,4 +50,15 @@ func (oa OpenAPI) Install(c *restful.Container, mux *mux.PathRecorderMux) (*hand
 	}
 
 	return openAPIVersionedService, spec
+}
+
+// BuildAndPruneOpenAPISpec builds an OpenAPI spec from
+// the give RegisteredWebServices and OpenAPI config
+func BuildAndPruneOpenAPISpec(s []*restful.WebService, cfg *common.Config) (*spec.Swagger, error) {
+	spec, err := builder.BuildOpenAPISpec(s, cfg)
+	if err != nil {
+		return nil, err
+	}
+	spec.Definitions = handler.PruneDefaults(spec.Definitions)
+	return spec, nil
 }

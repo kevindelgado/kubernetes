@@ -133,6 +133,12 @@ type GenericAPIServer struct {
 	// Enable swagger and/or OpenAPI if these configs are non-nil.
 	openAPIConfig *openapicommon.Config
 
+	// SkipOpenAPIInstallation indicates not to install the OpenAPI handler
+	// during PrepareRun.
+	// Set this to true when the specific API Server has its own OpenAPI handler
+	// (e.g. kube-aggregator)
+	skipOpenAPIInstallation bool
+
 	// OpenAPIVersionedService controls the /openapi/v2 endpoint, and can be used to update the served spec.
 	// It is set during PrepareRun.
 	OpenAPIVersionedService *handler.OpenAPIService
@@ -290,9 +296,19 @@ func (s *GenericAPIServer) PrepareRun() preparedGenericAPIServer {
 	s.delegationTarget.PrepareRun()
 
 	if s.openAPIConfig != nil {
-		s.OpenAPIVersionedService, s.StaticOpenAPISpec = routes.OpenAPI{
-			Config: s.openAPIConfig,
-		}.Install(s.Handler.GoRestfulContainer, s.Handler.NonGoRestfulMux)
+		if s.skipOpenAPIInstallation {
+			// we still need to set s.StaticOPenAPISpec even if
+			// we're not installing the openAPI handler
+			spec, err := routes.BuildAndPruneOpenAPISpec(s.Handler.GoRestfulContainer.RegisteredWebServices(), s.openAPIConfig)
+			if err != nil {
+				klog.Fatalf("Failed to build open api spec for root: %v", err)
+			}
+			s.StaticOpenAPISpec = spec
+		} else {
+			s.OpenAPIVersionedService, s.StaticOpenAPISpec = routes.OpenAPI{
+				Config: s.openAPIConfig,
+			}.Install(s.Handler.GoRestfulContainer, s.Handler.NonGoRestfulMux)
+		}
 	}
 
 	s.installHealthz()
