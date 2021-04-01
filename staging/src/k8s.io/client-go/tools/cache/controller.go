@@ -76,6 +76,9 @@ type Config struct {
 
 	// WatchListPageSize is the requested chunk size of initial and relist watch lists.
 	WatchListPageSize int64
+
+	// ReflectorErrors communicates errors from reflector ListAndWatch
+	ReflectorErrors chan error
 }
 
 // ShouldResyncFunc is a type of function that indicates if a reflector should perform a
@@ -148,6 +151,7 @@ func (c *controller) RunWithStopOptions(ctx context.Context, stopOptions StopOpt
 	if c.config.WatchErrorHandler != nil {
 		r.watchErrorHandler = c.config.WatchErrorHandler
 	}
+	r.errors = c.config.ReflectorErrors
 
 	c.reflectorMutex.Lock()
 	c.reflector = r
