@@ -134,6 +134,7 @@ func TestReflectorRunWithStopOptions(t *testing.T) {
 				return nil, listErr
 			},
 		}
+		r.errors = make(chan error, 100)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		go func() {
