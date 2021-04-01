@@ -113,10 +113,22 @@ type GraphBuilder struct {
 	ignoredResources map[schema.GroupResource]struct{}
 }
 
-type monitors map[schema.GroupVersionResource]cache.SharedIndexInformer
+// monitor runs an informer with access to the
+// event handlers in order to remove them
+// upon removal of the resource from discovery
+type monitor struct {
+	informer cache.SharedIndexInformer
+	handlers cache.ResourceEventHandler
+}
 
-func (gb *GraphBuilder) informerFor(resource schema.GroupVersionResource, kind schema.GroupVersionKind) (cache.SharedIndexInformer, error) {
-	handlers := cache.ResourceEventHandlerFuncs{
+func (m *monitor) removeEventHandler() error {
+	return m.informer.RemoveEventHandler(m.handlers)
+}
+
+type monitors map[schema.GroupVersionResource]*monitor
+
+func (gb *GraphBuilder) informerFor(resource schema.GroupVersionResource, kind schema.GroupVersionKind) (cache.SharedIndexInformer, cache.ResourceEventHandler, error) {
+	handlers := &cache.ResourceEventHandlerFuncs{
 		// add the event to the dependencyGraphBuilder's graphChanges.
 		AddFunc: func(obj interface{}) {
 			event := &event{
@@ -153,12 +165,12 @@ func (gb *GraphBuilder) informerFor(resource schema.GroupVersionResource, kind s
 	generic, err := gb.sharedInformers.ForResource(resource)
 	if err != nil {
 		klog.V(4).Infof("unable to use a shared informer for resource %q, kind %q: %v", resource.String(), kind.String(), err)
-		return nil, err
+		return nil, nil, err
 	}
 	klog.V(4).Infof("using a shared informer for resource %q, kind %q", resource.String(), kind.String())
 	// need to clone because it's from a shared cache
 	generic.Informer().AddEventHandlerWithResyncPeriod(handlers, ResourceResyncTime)
-	return generic.Informer(), nil
+	return generic.Informer(), handlers, nil
 }
 
 // syncMonitors rebuilds the monitor set according to the supplied resources,
@@ -194,15 +206,25 @@ func (gb *GraphBuilder) syncMonitors(resources map[schema.GroupVersionResource]s
 			errs = append(errs, fmt.Errorf("couldn't look up resource %q: %v", resource, err))
 			continue
 		}
-		shared, err := gb.informerFor(resource, kind)
+		shared, handlers, err := gb.informerFor(resource, kind)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("couldn't start monitor for resource %q: %v", resource, err))
 			continue
 		}
-		current[resource] = shared
+		current[resource] = &monitor{informer: shared, handlers: handlers}
 		added++
 	}
 	gb.monitors = current
+
+	for resource, monitor := range toRemove {
+		if err := monitor.removeEventHandler(); err != nil {
+			errs = append(errs, fmt.Errorf("couldn't remove event handler for resource %q: %v", resource, err))
+			//} else {
+			//	// todo is this necessary?
+			//	delete(gb.monitors, resource)
+			//	klog.Warningf("removed resource %v", resource)
+		}
+	}
 
 	klog.V(4).Infof("synced monitors; added %d, kept %d, removed %d", added, kept, len(toRemove))
 	// NewAggregate returns nil if errs is 0-length
@@ -231,9 +253,13 @@ func (gb *GraphBuilder) startMonitors() {
 		if info := gb.sharedInformers.ForStoppableResource(gvr); info != nil {
 			go func(gvr schema.GroupVersionResource) {
 				<-info.Done
-				gb.monitorLock.Lock()
-				defer gb.monitorLock.Unlock()
-				delete(gb.monitors, gvr)
+				klog.Warningf("informer stopped for gvr %v", gvr)
+				// instead of listening for the informer's Done channel,
+				// listen to see if the resource goes missing from discovery and then
+				// remove the EventHandler
+				//gb.monitorLock.Lock()
+				//defer gb.monitorLock.Unlock()
+				//delete(gb.monitors, gvr)
 			}(gvr)
 		}
 	}
@@ -253,8 +279,8 @@ func (gb *GraphBuilder) IsSynced() bool {
 		return false
 	}
 
-	for resource, shared := range gb.monitors {
-		if !shared.HasSynced() {
+	for resource, monitor := range gb.monitors {
+		if !monitor.informer.HasSynced() {
 			klog.V(4).Infof("garbage controller monitor not yet synced: %+v", resource)
 			return false
 		}

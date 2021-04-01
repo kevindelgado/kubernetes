@@ -45,9 +45,10 @@ type dynamicSharedInformerFactory struct {
 	// startedInformers is used for tracking which informers have been started.
 	// This allows Start() to be called multiple times safely.
 	// The cache.DoneChannel, when fired, indicates the informer has stopped.
-	startedInformers map[schema.GroupVersionResource]cache.DoneChannel
-	tweakListOptions TweakListOptionsFunc
-	stopOnError      cache.StopOnErrorFunc
+	startedInformers        map[schema.GroupVersionResource]cache.DoneChannel
+	tweakListOptions        TweakListOptionsFunc
+	stopOnError             cache.StopOnErrorFunc
+	stopOnZeroEventHandlers bool
 }
 
 var _ DynamicSharedInformerFactory = &dynamicSharedInformerFactory{}
@@ -58,6 +59,15 @@ var _ DynamicSharedInformerFactory = &dynamicSharedInformerFactory{}
 func WithStopOnError(stopOnError cache.StopOnErrorFunc) DynamicSharedInformerOption {
 	return func(factory *dynamicSharedInformerFactory) *dynamicSharedInformerFactory {
 		factory.stopOnError = stopOnError
+		return factory
+	}
+}
+
+// WithStopOnZerror indicates to shut down individual informers
+// if they have zero event handlers registered on them.
+func WithStopOnZeroEventHandlers(stopOnZeroEventHandlers bool) DynamicSharedInformerOption {
+	return func(factory *dynamicSharedInformerFactory) *dynamicSharedInformerFactory {
+		factory.stopOnZeroEventHandlers = stopOnZeroEventHandlers
 		return factory
 	}
 }
@@ -167,7 +177,8 @@ func (f *dynamicSharedInformerFactory) Start(stopCh <-chan struct{}) {
 		stopOnError = f.stopOnError
 	}
 	stopOptions := cache.StopOptions{
-		StopOnError: stopOnError,
+		StopOnError:             stopOnError,
+		StopOnZeroEventHandlers: f.stopOnZeroEventHandlers,
 	}
 	for informerType, informer := range f.informers {
 		informerType := informerType

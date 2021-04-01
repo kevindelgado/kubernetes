@@ -99,6 +99,8 @@ type Reflector struct {
 	WatchListPageSize int64
 	// Called whenever the ListAndWatch drops the connection with an error.
 	watchErrorHandler WatchErrorHandler
+	// ReflectorErrors
+	errors chan error
 }
 
 // ResourceVersionUpdater is an interface that allows store implementation to
@@ -124,6 +126,9 @@ type WatchErrorHandler func(r *Reflector, err error)
 
 // DefaultWatchErrorHandler is the default implementation of WatchErrorHandler
 func DefaultWatchErrorHandler(r *Reflector, err error) {
+	//klog.Warningf("dweh %v", r.errors)
+	//r.errors <- err
+	//klog.Warningf("passed to errors")
 	switch {
 	case isExpiredError(err):
 		// Don't set LastSyncResourceVersionUnavailable - LIST call with ResourceVersion=RV already
@@ -217,20 +222,27 @@ var internalPackages = []string{"client-go/tools/cache/"}
 // RunWithStopOptions will exit when one of the stopOptions conditions is met.
 func (r *Reflector) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
 	klog.V(2).Infof("Starting reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
+	klog.Warningf("Starting reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
 	lwCtx, lwCancel := context.WithCancel(ctx)
 	wait.BackoffUntil(func() {
 		if err := r.ListAndWatch(lwCtx.Done()); err != nil {
+			klog.Warningf("got an LW error %v", err)
+			//r.errors <- err
+			klog.Warningf("passed the error")
 			r.watchErrorHandler(r, err)
+			klog.Warningf("done passing the error")
 			// default to never stopping (same as previous behavior that only had stop channel)
 			if onListErr := stopOptions.StopOnError; onListErr != nil {
 				if onListErr(err) {
 					klog.V(2).Infof("Closing listAndWatch for %s with error from reflector %s", r.expectedTypeName, r.name)
+					klog.Warningf("Closing listAndWatch for %s with error from reflector %s", r.expectedTypeName, r.name)
 					lwCancel()
 				}
 			}
 		}
 	}, r.backoffManager, true, lwCtx.Done())
 	klog.V(2).Infof("Stopping reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
+	klog.Warningf("Stopping reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
 }
 
 // Run calls RunWithStopOptions and only exits when stopCh is closed
