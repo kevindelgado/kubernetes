@@ -476,6 +476,7 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 		s.stopped = true // Don't want any new listeners
 	}()
 	s.controller.RunWithStopOptions(ctrlCtx, stopOptions)
+	klog.Warningf("shared informer has stopped for %v", s.objectType)
 
 }
 
@@ -684,13 +685,14 @@ func (s *sharedIndexInformer) EventHandlerCount() int {
 func (s *sharedIndexInformer) RemoveEventHandler(handler ResourceEventHandler) error {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
+	klog.Warningf("remove event handler called")
 
 	if s.stopped {
 		return fmt.Errorf("Handler %v is not removed from shared informer because it has stopped already", handler)
 	}
 
 	if !reflect.ValueOf(handler).Type().Comparable() {
-		return fmt.Errorf("Uncomparable handler %v is not removed", handler)
+		return fmt.Errorf("Uncomparable handler of type %v is not removed", reflect.ValueOf(handler).Type())
 	}
 
 	// in order to safely remove, we have to
@@ -701,7 +703,9 @@ func (s *sharedIndexInformer) RemoveEventHandler(handler ResourceEventHandler) e
 	defer s.blockDeltas.Unlock()
 	s.processor.removeListenerFor(handler)
 	if len(s.processor.listeners) == 0 {
+		klog.Warningf("ZERO HANDLERS")
 		if s.zeroHandlerCancelFunc != nil {
+			klog.Warningf("calling the cancel func")
 			s.zeroHandlerCancelFunc()
 		}
 	}

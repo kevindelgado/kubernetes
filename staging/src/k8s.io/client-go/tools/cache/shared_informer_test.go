@@ -367,12 +367,27 @@ func TestSharedInformerRunWithStopOptions(t *testing.T) {
 	// waitTime is how long to wait for the stopOnError=false case to pass.
 	// It needs to just be long enough for the underlying reflector to make
 	// its initial list call and error out.
-	waitTime := time.Second
+	waitTime := 5 * time.Second
 	table := []struct {
-		stopOnError bool
+		stopOptions StopOptions
+		shouldStop  bool
 	}{
-		{true},
-		{false},
+		{
+			stopOptions: StopOptions{
+				StopOnError: func(error) bool { return true },
+			},
+			shouldStop: true,
+		},
+		{
+			stopOptions: StopOptions{
+				StopOnZeroEventHandlers: true,
+			},
+			shouldStop: true,
+		},
+		{
+			stopOptions: StopOptions{},
+			shouldStop:  false,
+		},
 	}
 	for _, item := range table {
 		source := fcache.NewFakeControllerSource()
@@ -380,25 +395,33 @@ func TestSharedInformerRunWithStopOptions(t *testing.T) {
 		source.ListError = fmt.Errorf("Access Denied")
 
 		informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+		handler := &ResourceEventHandlerFuncs{}
+		informer.AddEventHandler(handler)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		go func() {
 			// confirm the informer stops running when it hits a list error
 			defer cancel()
-			informer.RunWithStopOptions(ctx, StopOptions{
-				StopOnError: func(err error) bool {
-					return item.stopOnError
-				},
-			})
+			informer.RunWithStopOptions(ctx, item.stopOptions)
+
 		}()
+
+		if item.stopOptions.StopOnZeroEventHandlers {
+			go func() {
+				time.Sleep(time.Second)
+				if err := informer.RemoveEventHandler(handler); err != nil {
+					t.Errorf("unable to remove event handler: %v", err)
+				}
+			}()
+		}
 
 		select {
 		case <-ctx.Done():
-			if !item.stopOnError {
+			if !item.shouldStop {
 				t.Errorf("shared informer should NOT have stopped when stopOnError is false")
 			}
 		case <-time.After(waitTime):
-			if item.stopOnError {
+			if item.shouldStop {
 				t.Errorf("shared informer SHOULD have stopped itself when stopOnError is true, waited %s", waitTime.String())
 			}
 		}

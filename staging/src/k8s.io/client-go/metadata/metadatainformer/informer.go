@@ -44,9 +44,10 @@ type metadataSharedInformerFactory struct {
 	// startedInformers is used for tracking which informers have been started.
 	// This allows Start() to be called multiple times safely.
 	// The cache.DoneChannel, when fired, indicates the informer has stopped.
-	startedInformers map[schema.GroupVersionResource]cache.DoneChannel
-	tweakListOptions TweakListOptionsFunc
-	stopOnError      cache.StopOnErrorFunc
+	startedInformers        map[schema.GroupVersionResource]cache.DoneChannel
+	tweakListOptions        TweakListOptionsFunc
+	stopOnError             cache.StopOnErrorFunc
+	stopOnZeroEventHandlers bool
 }
 
 var _ SharedInformerFactory = &metadataSharedInformerFactory{}
@@ -57,6 +58,13 @@ var _ SharedInformerFactory = &metadataSharedInformerFactory{}
 func WithStopOnError(stopOnError cache.StopOnErrorFunc) SharedInformerOption {
 	return func(factory *metadataSharedInformerFactory) *metadataSharedInformerFactory {
 		factory.stopOnError = stopOnError
+		return factory
+	}
+}
+
+func WithStopOnZeroEventHandlers(stopOnZeroEventHandlers bool) SharedInformerOption {
+	return func(factory *metadataSharedInformerFactory) *metadataSharedInformerFactory {
+		factory.stopOnZeroEventHandlers = stopOnZeroEventHandlers
 		return factory
 	}
 }
@@ -166,7 +174,8 @@ func (f *metadataSharedInformerFactory) Start(stopCh <-chan struct{}) {
 		stopOnError = f.stopOnError
 	}
 	stopOptions := cache.StopOptions{
-		StopOnError: stopOnError,
+		StopOnError:             stopOnError,
+		StopOnZeroEventHandlers: f.stopOnZeroEventHandlers,
 	}
 	for informerType, informer := range f.informers {
 		informerType := informerType
