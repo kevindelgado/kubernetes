@@ -126,9 +126,9 @@ type WatchErrorHandler func(r *Reflector, err error)
 
 // DefaultWatchErrorHandler is the default implementation of WatchErrorHandler
 func DefaultWatchErrorHandler(r *Reflector, err error) {
-	klog.Warningf("dweh %v", r.errors)
-	r.errors <- err
-	klog.Warningf("passed to errors")
+	//klog.Warningf("dweh %v", r.errors)
+	//r.errors <- err
+	//klog.Warningf("passed to errors")
 	switch {
 	case isExpiredError(err):
 		// Don't set LastSyncResourceVersionUnavailable - LIST call with ResourceVersion=RV already
@@ -230,6 +230,7 @@ func (r *Reflector) RunWithStopOptions(ctx context.Context, stopOptions StopOpti
 			//r.errors <- err
 			klog.Warningf("passed the error")
 			r.watchErrorHandler(r, err)
+			klog.Warningf("done passing the error")
 			// default to never stopping (same as previous behavior that only had stop channel)
 			if onListErr := stopOptions.StopOnError; onListErr != nil {
 				if onListErr(err) {
