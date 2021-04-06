@@ -62,6 +62,8 @@ func WithStopOnError(stopOnError cache.StopOnErrorFunc) SharedInformerOption {
 	}
 }
 
+// WithStopOnZerror indicates to shut down individual informers
+// if they have zero event handlers registered on them.
 func WithStopOnZeroEventHandlers(stopOnZeroEventHandlers bool) SharedInformerOption {
 	return func(factory *metadataSharedInformerFactory) *metadataSharedInformerFactory {
 		factory.stopOnZeroEventHandlers = stopOnZeroEventHandlers

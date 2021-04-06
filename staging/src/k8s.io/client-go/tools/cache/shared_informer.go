@@ -430,6 +430,11 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 	// ctrlCtx so we're still passing ctrlCtx to the controller
 	zeroHandlerCtx, zeroHandlerCancel := context.WithCancel(ctx)
 	if stopOptions.StopOnZeroEventHandlers {
+		if s.EventHandlerCount() == 0 {
+			// don't even start the informer if
+			// there aren't any handlers registered.
+			return
+		}
 		s.zeroHandlerCancelFunc = zeroHandlerCancel
 	}
 
@@ -707,6 +712,8 @@ func (s *sharedIndexInformer) RemoveEventHandler(handler ResourceEventHandler) e
 		if s.zeroHandlerCancelFunc != nil {
 			klog.Warningf("calling the cancel func")
 			s.zeroHandlerCancelFunc()
+		} else {
+			klog.Warningf("no cancel func")
 		}
 	}
 	return nil
