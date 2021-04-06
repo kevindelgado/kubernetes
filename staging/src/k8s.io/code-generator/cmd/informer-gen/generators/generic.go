@@ -127,7 +127,6 @@ func (g *genericGenerator) GenerateType(c *generator.Context, t *types.Type, w i
 		"cacheGenericLister":         c.Universe.Type(cacheGenericLister),
 		"cacheNewGenericLister":      c.Universe.Function(cacheNewGenericLister),
 		"cacheSharedIndexInformer":   c.Universe.Type(cacheSharedIndexInformer),
-		"cacheDoneChannel":           c.Universe.Type(cacheDoneChannel),
 		"groups":                     groups,
 		"schemeGVs":                  schemeGVs,
 		"schemaGroupResource":        c.Universe.Type(schemaGroupResource),
@@ -136,7 +135,6 @@ func (g *genericGenerator) GenerateType(c *generator.Context, t *types.Type, w i
 
 	sw.Do(genericInformer, m)
 	sw.Do(forResource, m)
-	sw.Do(forStoppableResource, m)
 
 	return sw.Error()
 }
@@ -152,16 +150,6 @@ type GenericInformer interface {
 type genericInformer struct {
 	informer {{.cacheSharedIndexInformer|raw}}
 	resource {{.schemaGroupResource|raw}}
-}
-
-// StoppableInformerInfo contains an informer and a done channel
-// indicating when that informer has been stopped.
-type StoppableInformerInfo struct {
-	// Informer is the stoppable generic informer that has been
-	// stopped once Done has fired.
-	Informer GenericInformer
-	// Done is the channel indicating when the informer has stopped
-	Done {{.cacheDoneChannel|raw}}
 }
 
 // Informer returns the SharedIndexInformer.
@@ -192,17 +180,5 @@ func (f *sharedInformerFactory) ForResource(resource {{.schemaGroupVersionResour
 	}
 
 	return nil, fmt.Errorf("no informer found for %v", resource)
-}
-`
-
-var forStoppableResource = `
-// ForStoppableResource returns the informer info (informer and done channel)
-// indicating when the resource's informer is stopped.
-// This exists to satisfy the InformerFactory interface,  but because sharedInformerFactory
-// is only used with builtin types it is not expected to ever be called
-// (because StartWithStopOptions is never used as builtin resources are never uninstalled from the cluster).
-// Dynamicinformer and metadatainformer facotries actually implement ForStoppableResource.
-func (f *sharedInformerFactory) ForStoppableResource(gvr {{.schemaGroupVersionResource|raw}}) *StoppableInformerInfo {
-	return nil
 }
 `

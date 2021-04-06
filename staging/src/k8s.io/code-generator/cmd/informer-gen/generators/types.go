@@ -20,7 +20,6 @@ import "k8s.io/gengo/types"
 
 var (
 	apiScheme                   = types.Name{Package: "k8s.io/kubernetes/pkg/api/legacyscheme", Name: "Scheme"}
-	cacheDoneChannel            = types.Name{Package: "k8s.io/client-go/tools/cache", Name: "DoneChannel"}
 	cacheGenericLister          = types.Name{Package: "k8s.io/client-go/tools/cache", Name: "GenericLister"}
 	cacheIndexers               = types.Name{Package: "k8s.io/client-go/tools/cache", Name: "Indexers"}
 	cacheListWatch              = types.Name{Package: "k8s.io/client-go/tools/cache", Name: "ListWatch"}
