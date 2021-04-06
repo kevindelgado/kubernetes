@@ -196,9 +196,6 @@ type SharedInformer interface {
 	// offloaded.
 	SetWatchErrorHandler(handler WatchErrorHandler) error
 
-	// ReflectorErrors listens for ListAndWatch errors as they occur
-	ReflectorErrors() <-chan error
-
 	// EventHandlerCount return the number of actually registered
 	// event handlers.
 	EventHandlerCount() int
@@ -212,19 +209,8 @@ type SharedInformer interface {
 	IsStarted() bool
 }
 
-// DoneChannel is a type alias for a channel that closes when an informer is stopped.
-type DoneChannel <-chan struct{}
-
-// StopOnErrorFunc is a type alias for function that receives an error
-// anytime the underlying reflector's ListAndWatch call returns an error
-// and determines whether or not to stop the reflector (and corresponding controller and shared informer).
-type StopOnErrorFunc func(error) bool
-
 // StopOptions let the caller specify which conditions to stop the informer.
 type StopOptions struct {
-	// StopOnError inspects errors returned from the underlying reflector's ListAndWatch call,
-	// and based on the error determines whether or not to stop the informer.
-	StopOnError StopOnErrorFunc
 	// StopOnZeroEventHandlers, if true, stops the informer when it no longer has any
 	// event handlers registered for it.
 	StopOnZeroEventHandlers bool
@@ -425,9 +411,6 @@ func (s *sharedIndexInformer) SetWatchErrorHandler(handler WatchErrorHandler) er
 
 func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
 	defer utilruntime.HandleCrash()
-	// TODO: do we need both ctrlCtx and zeroHandlerCtx?
-	// If so, I think we can create zeroHandlerCtx first, wrap it with
-	// ctrlCtx so we're still passing ctrlCtx to the controller
 	zeroHandlerCtx, zeroHandlerCancel := context.WithCancel(ctx)
 	if stopOptions.StopOnZeroEventHandlers {
 		if s.EventHandlerCount() == 0 {
@@ -438,8 +421,6 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 		s.zeroHandlerCancelFunc = zeroHandlerCancel
 	}
 
-	ctrlCtx, ctrlCancel := context.WithCancel(zeroHandlerCtx)
-	defer ctrlCancel()
 	fifo := NewDeltaFIFOWithOptions(DeltaFIFOOptions{
 		KnownObjects:          s.indexer,
 		EmitDeltaTypeReplaced: true,
@@ -455,7 +436,6 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 
 		Process:           s.HandleDeltas,
 		WatchErrorHandler: s.watchErrorHandler,
-		ReflectorErrors:   s.reflectorErrors,
 	}
 
 	func() {
@@ -480,7 +460,7 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 		defer s.startedLock.Unlock()
 		s.stopped = true // Don't want any new listeners
 	}()
-	s.controller.RunWithStopOptions(ctrlCtx, stopOptions)
+	s.controller.Run(zeroHandlerCtx.Done())
 	klog.Warningf("shared informer has stopped for %v", s.objectType)
 
 }
@@ -539,10 +519,6 @@ func (s *sharedIndexInformer) AddIndexers(indexers Indexers) error {
 
 func (s *sharedIndexInformer) GetController() Controller {
 	return &dummyController{informer: s}
-}
-
-func (s *sharedIndexInformer) ReflectorErrors() <-chan error {
-	return s.reflectorErrors
 }
 
 func (s *sharedIndexInformer) AddEventHandler(handler ResourceEventHandler) {

@@ -162,15 +162,15 @@ func (gb *GraphBuilder) informerFor(resource schema.GroupVersionResource, kind s
 			gb.graphChanges.Add(event)
 		},
 	}
-	generic, err := gb.sharedInformers.ForResource(resource)
+	shared, err := gb.sharedInformers.ForResource(resource)
 	if err != nil {
 		klog.V(4).Infof("unable to use a shared informer for resource %q, kind %q: %v", resource.String(), kind.String(), err)
 		return nil, nil, err
 	}
 	klog.V(4).Infof("using a shared informer for resource %q, kind %q", resource.String(), kind.String())
 	// need to clone because it's from a shared cache
-	generic.Informer().AddEventHandlerWithResyncPeriod(handlers, ResourceResyncTime)
-	return generic.Informer(), handlers, nil
+	shared.Informer().AddEventHandlerWithResyncPeriod(handlers, ResourceResyncTime)
+	return shared.Informer(), handlers, nil
 }
 
 // syncMonitors rebuilds the monitor set according to the supplied resources,
@@ -206,12 +206,12 @@ func (gb *GraphBuilder) syncMonitors(resources map[schema.GroupVersionResource]s
 			errs = append(errs, fmt.Errorf("couldn't look up resource %q: %v", resource, err))
 			continue
 		}
-		shared, handlers, err := gb.informerFor(resource, kind)
+		i, h, err := gb.informerFor(resource, kind)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("couldn't start monitor for resource %q: %v", resource, err))
 			continue
 		}
-		current[resource] = &monitor{informer: shared, handlers: handlers}
+		current[resource] = &monitor{informer: i, handlers: h}
 		added++
 	}
 	gb.monitors = current
@@ -219,10 +219,6 @@ func (gb *GraphBuilder) syncMonitors(resources map[schema.GroupVersionResource]s
 	for resource, monitor := range toRemove {
 		if err := monitor.removeEventHandler(); err != nil {
 			errs = append(errs, fmt.Errorf("couldn't remove event handler for resource %q: %v", resource, err))
-			//} else {
-			//	// todo is this necessary?
-			//	delete(gb.monitors, resource)
-			//	klog.Warningf("removed resource %v", resource)
 		}
 	}
 
@@ -249,20 +245,6 @@ func (gb *GraphBuilder) startMonitors() {
 	<-gb.informersStarted
 
 	gb.sharedInformers.Start(gb.stopCh)
-	for gvr := range gb.monitors {
-		if info := gb.sharedInformers.ForStoppableResource(gvr); info != nil {
-			go func(gvr schema.GroupVersionResource) {
-				<-info.Done
-				klog.Warningf("informer stopped for gvr %v", gvr)
-				// instead of listening for the informer's Done channel,
-				// listen to see if the resource goes missing from discovery and then
-				// remove the EventHandler
-				//gb.monitorLock.Lock()
-				//defer gb.monitorLock.Unlock()
-				//delete(gb.monitors, gvr)
-			}(gvr)
-		}
-	}
 	klog.V(4).Infof("all %d monitors have been started", len(gb.monitors))
 }
 

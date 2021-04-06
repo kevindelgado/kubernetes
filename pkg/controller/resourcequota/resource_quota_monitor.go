@@ -210,7 +210,7 @@ func (qm *QuotaMonitor) SyncMonitors(resources map[schema.GroupVersionResource]s
 			kept++
 			continue
 		}
-		informer, handlers, err := qm.informerFor(resource)
+		i, h, err := qm.informerFor(resource)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("couldn't start monitor for resource %q: %v", resource, err))
 			continue
@@ -227,7 +227,7 @@ func (qm *QuotaMonitor) SyncMonitors(resources map[schema.GroupVersionResource]s
 		}
 
 		// track the informer
-		current[resource] = &monitor{informer: informer, handlers: handlers}
+		current[resource] = &monitor{informer: i, handlers: h}
 		added++
 	}
 	qm.monitors = current
@@ -235,10 +235,6 @@ func (qm *QuotaMonitor) SyncMonitors(resources map[schema.GroupVersionResource]s
 	for resource, monitor := range toRemove {
 		if err := monitor.removeEventHandler(); err != nil {
 			errs = append(errs, fmt.Errorf("couldn't remove event handler for resource %q: %v", resource, err))
-			//} else {
-			//	// todo is this necessary?
-			//	delete(qm.monitors, resource)
-			//	klog.Warningf("removed resource %v", resource)
 		}
 	}
 
@@ -265,17 +261,6 @@ func (qm *QuotaMonitor) StartMonitors() {
 	<-qm.informersStarted
 
 	qm.informerFactory.Start(qm.stopCh)
-	//for gvr := range qm.monitors {
-	//	if info := qm.informerFactory.ForStoppableResource(gvr); info != nil {
-	//		go func(gvr schema.GroupVersionResource) {
-	//			<-info.Done
-	//			klog.Warningf("informer stopped for gvr %v", gvr)
-	//			//qm.monitorLock.Lock()
-	//			//defer qm.monitorLock.Unlock()
-	//			//delete(qm.monitors, gvr)
-	//		}(gvr)
-	//	}
-	//}
 	klog.V(4).Infof("QuotaMonitor started all %d monitors", len(qm.monitors))
 }
 
