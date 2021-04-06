@@ -216,6 +216,57 @@ func TestSpecificInformerStopOnError(t *testing.T) {
 	}
 }
 
+// TestSpecificInformerStopOnZeroEventHandlers tests that when an informer
+// has all its event handlers removed, the informer itself will shut down.
+func TestSpecificInformerStopOnZeroEventHandlers(t *testing.T) {
+	scenarios := []struct {
+		stopOnZeroEventHandlers bool
+	}{
+		{
+			stopOnZeroEventHandlers: true,
+		},
+		{
+			stopOnZeroEventHandlers: false,
+		},
+	}
+
+	for _, ts := range scenarios {
+		timeout := time.Duration(5 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		testObject := newPartialObjectMetadata("apps/v1", "Deployment", "ns-foo", "name-foo")
+		scheme := runtime.NewScheme()
+		metav1.AddMetaToScheme(scheme)
+		fakeClient := fake.NewSimpleMetadataClient(scheme, []runtime.Object{testObject}...)
+		gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+		target := NewSharedInformerFactoryWithOptions(fakeClient, 0, WithStopOnZeroEventHandlers(ts.stopOnZeroEventHandlers))
+		handler := &cache.ResourceEventHandlerFuncs{}
+
+		// retrieve the informer for the resource forces the factory to create the informer.
+		informer := target.ForResource(gvr)
+		informer.Informer().AddEventHandler(handler)
+		target.Start(ctx.Done())
+
+		go func() {
+			time.Sleep(time.Second)
+			if err := informer.Informer().RemoveEventHandler(handler); err != nil {
+				t.Errorf("failed to remove event handler: %v", err)
+			}
+		}()
+
+		<-time.NewTimer(2 * time.Second).C
+		if informer.Informer().IsStopped() {
+			if !ts.stopOnZeroEventHandlers {
+				t.Errorf("informer should NOT have stopped when stopOnZeroEventHandlers is false")
+			}
+		} else {
+			if ts.stopOnZeroEventHandlers {
+				t.Errorf("informer SHOULD have stopped itself when stopOnZeroEventHandlers is true, waited 3s")
+			}
+		}
+	}
+}
+
 func newPartialObjectMetadata(apiVersion, kind, namespace, name string) *metav1.PartialObjectMetadata {
 	return &metav1.PartialObjectMetadata{
 		TypeMeta: metav1.TypeMeta{

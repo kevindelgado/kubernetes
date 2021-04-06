@@ -113,6 +113,9 @@ type GraphBuilder struct {
 	ignoredResources map[schema.GroupResource]struct{}
 }
 
+// monitor runs an informer with access to the
+// event handlers in order to remove them
+// upon removal of the resource from discovery
 type monitor struct {
 	informer cache.SharedIndexInformer
 	handlers cache.ResourceEventHandler
@@ -216,9 +219,10 @@ func (gb *GraphBuilder) syncMonitors(resources map[schema.GroupVersionResource]s
 	for resource, monitor := range toRemove {
 		if err := monitor.removeEventHandler(); err != nil {
 			errs = append(errs, fmt.Errorf("couldn't remove event handler for resource %q: %v", resource, err))
-		} else {
-			delete(gb.monitors, resource)
-			klog.Warningf("removed resource %v", resource)
+			//} else {
+			//	// todo is this necessary?
+			//	delete(gb.monitors, resource)
+			//	klog.Warningf("removed resource %v", resource)
 		}
 	}
 

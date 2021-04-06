@@ -1163,16 +1163,25 @@ func testCRDDeletion(t *testing.T, ctx *testContext, ns *v1.Namespace, definitio
 
 	time.Sleep(ctx.syncPeriod + 5*time.Second)
 
+	// Retrieve the informer before deletion to check it's been stopped.
+	gvr := schema.GroupVersionResource{Group: definition.Spec.Group, Version: definition.Spec.Versions[0].Name, Resource: definition.Spec.Names.Plural}
+	informer, err := ctx.informers.ForResource(gvr)
+	if err != nil {
+		t.Fatalf("error getting informer for resource")
+	}
+	if informer.Informer().IsStopped() {
+		t.Fatalf("informer stopped unexpectedly prior to deletion")
+	}
+
 	// Delete the definition, which should cascade to the owner and ultimately its dependents.
 	if err := apiextensionstestserver.DeleteV1CustomResourceDefinition(definition, apiExtensionClient); err != nil {
 		t.Fatalf("failed to delete %q: %v", definition.Name, err)
 	}
 
-	// the informer should be stopped upon CRD deletion
-	gvr := schema.GroupVersionResource{Group: definition.Spec.Group, Version: definition.Spec.Versions[0].Name, Resource: definition.Spec.Names.Plural}
-	select {
-	case <-ctx.informers.ForStoppableResource(gvr).Done:
-	case <-time.NewTimer(60 * time.Second).C:
+	// Ensure the informer is stopped upon CRD deletion
+	if err := wait.Poll(1*time.Second, 30*time.Second, func() (bool, error) {
+		return informer.Informer().IsStopped(), nil
+	}); err != nil {
 		t.Fatalf("CRD informer failed to stop upon deletion")
 	}
 
