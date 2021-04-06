@@ -101,8 +101,7 @@ func TestQuota(t *testing.T) {
 	defer close(controllerCh)
 
 	metadataClient := metadata.NewForConfigOrDie(clientConfig)
-	stopOnError := func(error) bool { return true }
-	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, controller.NoResyncPeriodFunc(), metadatainformer.WithStopOnError(stopOnError))
+	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, controller.NoResyncPeriodFunc(), metadatainformer.WithStopOnZeroEventHandlers(true))
 	informers := informerfactory.NewInformerFactory(internalInformers, metadataInformers)
 	rm := replicationcontroller.NewReplicationManager(
 		internalInformers.Core().V1().Pods(),
