@@ -196,9 +196,6 @@ type SharedInformer interface {
 	// offloaded.
 	SetWatchErrorHandler(handler WatchErrorHandler) error
 
-	// ReflectorErrors listens for ListAndWatch errors as they occur
-	ReflectorErrors() <-chan error
-
 	// EventHandlerCount return the number of actually registered
 	// event handlers.
 	EventHandlerCount() int
@@ -425,9 +422,6 @@ func (s *sharedIndexInformer) SetWatchErrorHandler(handler WatchErrorHandler) er
 
 func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
 	defer utilruntime.HandleCrash()
-	// TODO: do we need both ctrlCtx and zeroHandlerCtx?
-	// If so, I think we can create zeroHandlerCtx first, wrap it with
-	// ctrlCtx so we're still passing ctrlCtx to the controller
 	zeroHandlerCtx, zeroHandlerCancel := context.WithCancel(ctx)
 	if stopOptions.StopOnZeroEventHandlers {
 		if s.EventHandlerCount() == 0 {
@@ -438,8 +432,6 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 		s.zeroHandlerCancelFunc = zeroHandlerCancel
 	}
 
-	ctrlCtx, ctrlCancel := context.WithCancel(zeroHandlerCtx)
-	defer ctrlCancel()
 	fifo := NewDeltaFIFOWithOptions(DeltaFIFOOptions{
 		KnownObjects:          s.indexer,
 		EmitDeltaTypeReplaced: true,
@@ -455,7 +447,6 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 
 		Process:           s.HandleDeltas,
 		WatchErrorHandler: s.watchErrorHandler,
-		ReflectorErrors:   s.reflectorErrors,
 	}
 
 	func() {
@@ -480,7 +471,7 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 		defer s.startedLock.Unlock()
 		s.stopped = true // Don't want any new listeners
 	}()
-	s.controller.RunWithStopOptions(ctrlCtx, stopOptions)
+	s.controller.Run(zeroHandlerCtx.Done())
 	klog.Warningf("shared informer has stopped for %v", s.objectType)
 
 }
@@ -539,10 +530,6 @@ func (s *sharedIndexInformer) AddIndexers(indexers Indexers) error {
 
 func (s *sharedIndexInformer) GetController() Controller {
 	return &dummyController{informer: s}
-}
-
-func (s *sharedIndexInformer) ReflectorErrors() <-chan error {
-	return s.reflectorErrors
 }
 
 func (s *sharedIndexInformer) AddEventHandler(handler ResourceEventHandler) {

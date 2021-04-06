@@ -416,7 +416,7 @@ func TestSharedInformerRemoveHandlerFailure(t *testing.T) {
 	if err := informer.RemoveEventHandler(handler1); err == nil {
 		t.Errorf("removing value handler did not fail")
 	} else {
-		if err.Error() != "Uncomparable handler {<nil> <nil> <nil>} is not removed" {
+		if err.Error() != "Uncomparable handler of type cache.ResourceEventHandlerFuncs is not removed" {
 			t.Errorf("unexpected remove error: %s", err)
 		}
 	}
@@ -541,12 +541,6 @@ func TestSharedInformerRunWithStopOptions(t *testing.T) {
 	}{
 		{
 			stopOptions: StopOptions{
-				StopOnError: func(error) bool { return true },
-			},
-			shouldStop: true,
-		},
-		{
-			stopOptions: StopOptions{
 				StopOnZeroEventHandlers: true,
 			},
 			shouldStop: true,
@@ -573,14 +567,12 @@ func TestSharedInformerRunWithStopOptions(t *testing.T) {
 
 		}()
 
-		if item.stopOptions.StopOnZeroEventHandlers {
-			go func() {
-				time.Sleep(time.Second)
-				if err := informer.RemoveEventHandler(handler); err != nil {
-					t.Errorf("unable to remove event handler: %v", err)
-				}
-			}()
-		}
+		go func() {
+			time.Sleep(time.Second)
+			if err := informer.RemoveEventHandler(handler); err != nil {
+				t.Errorf("unable to remove event handler: %v", err)
+			}
+		}()
 
 		select {
 		case <-ctx.Done():
