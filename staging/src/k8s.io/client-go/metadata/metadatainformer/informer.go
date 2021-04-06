@@ -43,7 +43,6 @@ type metadataSharedInformerFactory struct {
 	informers map[schema.GroupVersionResource]informers.GenericInformer
 	// startedInformers is used for tracking which informers have been started.
 	// This allows Start() to be called multiple times safely.
-	// The cache.DoneChannel, when fired, indicates the informer has stopped.
 	startedInformers        map[schema.GroupVersionResource]bool
 	tweakListOptions        TweakListOptionsFunc
 	stopOnZeroEventHandlers bool
