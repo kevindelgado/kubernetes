@@ -219,10 +219,6 @@ func (gb *GraphBuilder) syncMonitors(resources map[schema.GroupVersionResource]s
 	for resource, monitor := range toRemove {
 		if err := monitor.removeEventHandler(); err != nil {
 			errs = append(errs, fmt.Errorf("couldn't remove event handler for resource %q: %v", resource, err))
-			//} else {
-			//	// todo is this necessary?
-			//	delete(gb.monitors, resource)
-			//	klog.Warningf("removed resource %v", resource)
 		}
 	}
 
@@ -249,20 +245,6 @@ func (gb *GraphBuilder) startMonitors() {
 	<-gb.informersStarted
 
 	gb.sharedInformers.Start(gb.stopCh)
-	for gvr := range gb.monitors {
-		if info := gb.sharedInformers.ForStoppableResource(gvr); info != nil {
-			go func(gvr schema.GroupVersionResource) {
-				<-info.Done
-				klog.Warningf("informer stopped for gvr %v", gvr)
-				// instead of listening for the informer's Done channel,
-				// listen to see if the resource goes missing from discovery and then
-				// remove the EventHandler
-				//gb.monitorLock.Lock()
-				//defer gb.monitorLock.Unlock()
-				//delete(gb.monitors, gvr)
-			}(gvr)
-		}
-	}
 	klog.V(4).Infof("all %d monitors have been started", len(gb.monitors))
 }
 

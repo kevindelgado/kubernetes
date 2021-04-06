@@ -78,7 +78,6 @@ func ExtensionSetup(t *testing.T, result *kubeapiservertesting.TestServer, worke
 	if err != nil {
 		t.Fatalf("failed to create dynamicClient: %v", err)
 	}
-	//onError := func(error) bool { return true }
 	sharedInformers := informers.NewSharedInformerFactory(clientSet, 0)
 	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, 0, metadatainformer.WithStopOnZeroEventHandlers(true))
 
