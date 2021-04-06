@@ -209,19 +209,8 @@ type SharedInformer interface {
 	IsStarted() bool
 }
 
-// DoneChannel is a type alias for a channel that closes when an informer is stopped.
-type DoneChannel <-chan struct{}
-
-// StopOnErrorFunc is a type alias for function that receives an error
-// anytime the underlying reflector's ListAndWatch call returns an error
-// and determines whether or not to stop the reflector (and corresponding controller and shared informer).
-type StopOnErrorFunc func(error) bool
-
 // StopOptions let the caller specify which conditions to stop the informer.
 type StopOptions struct {
-	// StopOnError inspects errors returned from the underlying reflector's ListAndWatch call,
-	// and based on the error determines whether or not to stop the informer.
-	StopOnError StopOnErrorFunc
 	// StopOnZeroEventHandlers, if true, stops the informer when it no longer has any
 	// event handlers registered for it.
 	StopOnZeroEventHandlers bool
