@@ -44,23 +44,12 @@ type metadataSharedInformerFactory struct {
 	// startedInformers is used for tracking which informers have been started.
 	// This allows Start() to be called multiple times safely.
 	// The cache.DoneChannel, when fired, indicates the informer has stopped.
-	startedInformers        map[schema.GroupVersionResource]cache.DoneChannel
+	startedInformers        map[schema.GroupVersionResource]bool
 	tweakListOptions        TweakListOptionsFunc
-	stopOnError             cache.StopOnErrorFunc
 	stopOnZeroEventHandlers bool
 }
 
 var _ SharedInformerFactory = &metadataSharedInformerFactory{}
-
-// WithStopOnError sets the stopOnErrorFunc that is added to the stop options
-// when calling StartWithStopOptions.
-// This method results in every informer in this factory getting the same stop options.
-func WithStopOnError(stopOnError cache.StopOnErrorFunc) SharedInformerOption {
-	return func(factory *metadataSharedInformerFactory) *metadataSharedInformerFactory {
-		factory.stopOnError = stopOnError
-		return factory
-	}
-}
 
 // WithStopOnZerror indicates to shut down individual informers
 // if they have zero event handlers registered on them.
@@ -106,7 +95,7 @@ func NewSharedInformerFactoryWithOptions(client metadata.Interface, defaultResyn
 		defaultResync:    defaultResync,
 		namespace:        metav1.NamespaceAll,
 		informers:        map[schema.GroupVersionResource]informers.GenericInformer{},
-		startedInformers: make(map[schema.GroupVersionResource]cache.DoneChannel),
+		startedInformers: make(map[schema.GroupVersionResource]bool),
 	}
 
 	// Apply all options
@@ -115,26 +104,6 @@ func NewSharedInformerFactoryWithOptions(client metadata.Interface, defaultResyn
 	}
 
 	return factory
-}
-
-// ForStoppableResource returns the informer info (informer and done channel) for a given resource.
-// If the informer has not been started yet, the method returns nil.
-// ForResource must be called first in order to create the informer and add it to the factory's informers slice.
-// If the informer does exist, then the DoneChannel can be used to see when the specific informer has stopped.
-// The informer must be returned alongside the DoneChannel to prevent races where a stopped informer is returned.
-func (f *metadataSharedInformerFactory) ForStoppableResource(gvr schema.GroupVersionResource) *informers.StoppableInformerInfo {
-	informer := f.ForResource(gvr)
-	f.lock.Lock()
-	defer f.lock.Unlock()
-
-	doneCh, ok := f.startedInformers[gvr]
-	if !ok {
-		return nil
-	}
-	return &informers.StoppableInformerInfo{
-		Informer: informer,
-		Done:     doneCh,
-	}
 }
 
 func (f *metadataSharedInformerFactory) ForResource(gvr schema.GroupVersionResource) informers.GenericInformer {
@@ -168,21 +137,13 @@ func (f *metadataSharedInformerFactory) Start(stopCh <-chan struct{}) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
-	// default stopOnError is to never stop
-	stopOnError := func(error) bool {
-		return false
-	}
-	if f.stopOnError != nil {
-		stopOnError = f.stopOnError
-	}
 	stopOptions := cache.StopOptions{
-		StopOnError:             stopOnError,
 		StopOnZeroEventHandlers: f.stopOnZeroEventHandlers,
 	}
 	for informerType, informer := range f.informers {
 		informerType := informerType
 		informer := informer
-		if _, ok := f.startedInformers[informerType]; !ok {
+		if !f.startedInformers[informerType] {
 			infCtx, infCancel := context.WithCancel(context.TODO())
 			go func() {
 				select {
@@ -196,7 +157,7 @@ func (f *metadataSharedInformerFactory) Start(stopCh <-chan struct{}) {
 				defer infCancel()
 				informer.Informer().RunWithStopOptions(infCtx, stopOptions)
 			}()
-			f.startedInformers[informerType] = infCtx.Done()
+			f.startedInformers[informerType] = true
 		}
 	}
 }
@@ -209,7 +170,7 @@ func (f *metadataSharedInformerFactory) WaitForCacheSync(stopCh <-chan struct{})
 
 		informers := map[schema.GroupVersionResource]cache.SharedIndexInformer{}
 		for informerType, informer := range f.informers {
-			if _, ok := f.startedInformers[informerType]; ok {
+			if f.startedInformers[informerType] {
 				informers[informerType] = informer.Informer()
 			}
 		}
