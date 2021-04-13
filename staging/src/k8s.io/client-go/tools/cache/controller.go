@@ -213,6 +213,7 @@ type ResourceEventHandler interface {
 	OnAdd(obj interface{})
 	OnUpdate(oldObj, newObj interface{})
 	OnDelete(obj interface{})
+	OnError(err error)
 }
 
 // ResourceEventHandlerFuncs is an adaptor to let you easily specify as many or
@@ -223,6 +224,7 @@ type ResourceEventHandlerFuncs struct {
 	AddFunc    func(obj interface{})
 	UpdateFunc func(oldObj, newObj interface{})
 	DeleteFunc func(obj interface{})
+	ErrorFunc  func(err error)
 }
 
 // OnAdd calls AddFunc if it's not nil.
@@ -243,6 +245,12 @@ func (r ResourceEventHandlerFuncs) OnUpdate(oldObj, newObj interface{}) {
 func (r ResourceEventHandlerFuncs) OnDelete(obj interface{}) {
 	if r.DeleteFunc != nil {
 		r.DeleteFunc(obj)
+	}
+}
+
+func (r ResourceEventHandlerFuncs) OnError(err error) {
+	if r.ErrorFunc != nil {
+		r.ErrorFunc(err)
 	}
 }
 
@@ -286,6 +294,10 @@ func (r FilteringResourceEventHandler) OnDelete(obj interface{}) {
 		return
 	}
 	r.Handler.OnDelete(obj)
+}
+
+func (r FilteringResourceEventHandler) OnError(err error) {
+	r.Handler.OnError(err)
 }
 
 // DeletionHandlingMetaNamespaceKeyFunc checks for

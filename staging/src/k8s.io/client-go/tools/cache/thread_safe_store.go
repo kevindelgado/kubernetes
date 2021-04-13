@@ -42,6 +42,7 @@ type ThreadSafeStore interface {
 	Add(key string, obj interface{})
 	Update(key string, obj interface{})
 	Delete(key string)
+	Error(err error)
 	Get(key string) (item interface{}, exists bool)
 	List() []interface{}
 	ListKeys() []string
@@ -68,6 +69,15 @@ type threadSafeMap struct {
 	indexers Indexers
 	// indices maps a name to an Index
 	indices Indices
+}
+
+func (c *threadSafeMap) Error(err error) {
+	errKey := "error"
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	oldObject := c.items[errKey]
+	c.items[errKey] = err
+	c.updateIndices(oldObject, err, errKey)
 }
 
 func (c *threadSafeMap) Add(key string, obj interface{}) {

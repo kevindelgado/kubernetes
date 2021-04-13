@@ -68,6 +68,8 @@ type Store interface {
 	// meaning in some implementations that have non-trivial
 	// additional behavior (e.g., DeltaFIFO).
 	Resync() error
+
+	Error(err error) error
 }
 
 // KeyFunc knows how to make a key from an object. Implementations should be deterministic.
@@ -168,6 +170,11 @@ func (c *cache) Delete(obj interface{}) error {
 		return KeyError{obj, err}
 	}
 	c.cacheStorage.Delete(key)
+	return nil
+}
+
+func (c *cache) Error(err error) error {
+	c.cacheStorage.Error(err)
 	return nil
 }
 

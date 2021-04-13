@@ -684,7 +684,6 @@ func (s *sharedIndexInformer) RemoveEventHandler(handler ResourceEventHandler) e
 	defer s.blockDeltas.Unlock()
 	s.processor.removeListenerFor(handler)
 	if len(s.processor.listeners) == 0 {
-		klog.Warningf("ZERO HANDLERS")
 		if s.zeroHandlerCancelFunc != nil {
 			klog.Warningf("calling the cancel func")
 			s.zeroHandlerCancelFunc()
@@ -935,6 +934,8 @@ func (p *processorListener) run() {
 				p.handler.OnAdd(notification.newObj)
 			case deleteNotification:
 				p.handler.OnDelete(notification.oldObj)
+			case errorNotification:
+				p.handler.OnError(notification.error)
 			default:
 				utilruntime.HandleError(fmt.Errorf("unrecognized notification: %T", next))
 			}

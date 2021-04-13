@@ -60,6 +60,7 @@ const (
 	addEvent eventType = iota
 	updateEvent
 	deleteEvent
+	errorEvent
 )
 
 type event struct {
@@ -67,6 +68,7 @@ type event struct {
 	virtual   bool
 	eventType eventType
 	obj       interface{}
+	err       error
 	// the update event comes with an old object, but it's not used by the garbage collector.
 	oldObj interface{}
 	gvk    schema.GroupVersionKind
@@ -161,6 +163,17 @@ func (gb *GraphBuilder) informerFor(resource schema.GroupVersionResource, kind s
 			}
 			gb.graphChanges.Add(event)
 		},
+		ErrorFunc: func(err error) {
+			klog.Warningf("got error for resource %q", resource)
+			gb.monitorLock.RLock()
+			if m, ok := gb.monitors[resource]; ok {
+				if err := m.removeEventHandler(); err != nil {
+					utilruntime.HandleError(fmt.Errorf("couldn't remove event handler for resource %q: %v", resource, err))
+				}
+				klog.Warningf("removed handler for resource %q", resource)
+			}
+			gb.monitorLock.RUnlock()
+		},
 	}
 	shared, err := gb.sharedInformers.ForResource(resource)
 	if err != nil {
@@ -216,11 +229,11 @@ func (gb *GraphBuilder) syncMonitors(resources map[schema.GroupVersionResource]s
 	}
 	gb.monitors = current
 
-	for resource, monitor := range toRemove {
-		if err := monitor.removeEventHandler(); err != nil {
-			errs = append(errs, fmt.Errorf("couldn't remove event handler for resource %q: %v", resource, err))
-		}
-	}
+	//for resource, monitor := range toRemove {
+	//	if err := monitor.removeEventHandler(); err != nil {
+	//		errs = append(errs, fmt.Errorf("couldn't remove event handler for resource %q: %v", resource, err))
+	//	}
+	//}
 
 	klog.V(4).Infof("synced monitors; added %d, kept %d, removed %d", added, kept, len(toRemove))
 	// NewAggregate returns nil if errs is 0-length
@@ -599,6 +612,7 @@ func (gb *GraphBuilder) processGraphChanges() bool {
 		utilruntime.HandleError(fmt.Errorf("expect a *event, got %v", item))
 		return true
 	}
+
 	obj := event.obj
 	accessor, err := meta.Accessor(obj)
 	if err != nil {
