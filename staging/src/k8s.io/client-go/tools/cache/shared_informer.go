@@ -397,6 +397,10 @@ type deleteNotification struct {
 	oldObj interface{}
 }
 
+type errorNotification struct {
+	err error
+}
+
 func (s *sharedIndexInformer) SetWatchErrorHandler(handler WatchErrorHandler) error {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
@@ -935,7 +939,7 @@ func (p *processorListener) run() {
 			case deleteNotification:
 				p.handler.OnDelete(notification.oldObj)
 			case errorNotification:
-				p.handler.OnError(notification.error)
+				p.handler.OnError(notification.err)
 			default:
 				utilruntime.HandleError(fmt.Errorf("unrecognized notification: %T", next))
 			}

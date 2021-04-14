@@ -145,7 +145,8 @@ const (
 	// EmitDeltaTypeReplaced is true.
 	Replaced DeltaType = "Replaced"
 	// Sync is for synthetic events during a periodic resync.
-	Sync DeltaType = "Sync"
+	Sync    DeltaType = "Sync"
+	Errored DeltaType = "Errored"
 )
 
 // Delta is a member of Deltas (a list of Delta objects) which
@@ -270,6 +271,14 @@ func (f *DeltaFIFO) HasSynced() bool {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	return f.populated && f.initialPopulationCount == 0
+}
+
+func (f *DeltaFIFO) Error(err error) error {
+	return nil
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	f.populated = true
+	return f.queueActionLocked(Errored, err)
 }
 
 // Add inserts an item, and puts it in the queue. The item is only enqueued

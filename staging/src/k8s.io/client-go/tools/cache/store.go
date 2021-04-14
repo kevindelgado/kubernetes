@@ -68,7 +68,10 @@ type Store interface {
 	// meaning in some implementations that have non-trivial
 	// additional behavior (e.g., DeltaFIFO).
 	Resync() error
+}
 
+type ErrorStore interface {
+	Store
 	Error(err error) error
 }
 
@@ -256,10 +259,24 @@ func (c *cache) Resync() error {
 	return nil
 }
 
+func NewErrorStore(keyFunc KeyFunc) ErrorStore {
+	return &cache{
+		cacheStorage: NewThreadSafeStore(Indexers{}, Indices{}),
+		keyFunc:      keyFunc,
+	}
+}
+
 // NewStore returns a Store implemented simply with a map and a lock.
 func NewStore(keyFunc KeyFunc) Store {
 	return &cache{
 		cacheStorage: NewThreadSafeStore(Indexers{}, Indices{}),
+		keyFunc:      keyFunc,
+	}
+}
+
+func NewErrorIndexer(keyFunc KeyFunc, indexers Indexers) ErrorIndexer {
+	return &cache{
+		cacheStorage: NewThreadSafeStore(indexers, Indices{}),
 		keyFunc:      keyFunc,
 	}
 }
