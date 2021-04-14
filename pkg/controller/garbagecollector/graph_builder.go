@@ -170,7 +170,7 @@ func (gb *GraphBuilder) informerFor(resource schema.GroupVersionResource, kind s
 				if err := m.removeEventHandler(); err != nil {
 					utilruntime.HandleError(fmt.Errorf("couldn't remove event handler for resource %q: %v", resource, err))
 				}
-				klog.Warningf("removed handler for resource %q", resource)
+				klog.Infof("removed handler for resource %q", resource)
 			}
 			gb.monitorLock.RUnlock()
 		},
@@ -228,12 +228,6 @@ func (gb *GraphBuilder) syncMonitors(resources map[schema.GroupVersionResource]s
 		added++
 	}
 	gb.monitors = current
-
-	//for resource, monitor := range toRemove {
-	//	if err := monitor.removeEventHandler(); err != nil {
-	//		errs = append(errs, fmt.Errorf("couldn't remove event handler for resource %q: %v", resource, err))
-	//	}
-	//}
 
 	klog.V(4).Infof("synced monitors; added %d, kept %d, removed %d", added, kept, len(toRemove))
 	// NewAggregate returns nil if errs is 0-length
@@ -612,7 +606,6 @@ func (gb *GraphBuilder) processGraphChanges() bool {
 		utilruntime.HandleError(fmt.Errorf("expect a *event, got %v", item))
 		return true
 	}
-
 	obj := event.obj
 	accessor, err := meta.Accessor(obj)
 	if err != nil {

@@ -245,7 +245,7 @@ func NewSharedIndexInformer(lw ListerWatcher, exampleObject runtime.Object, defa
 	realClock := &clock.RealClock{}
 	sharedIndexInformer := &sharedIndexInformer{
 		processor:                       &sharedProcessor{clock: realClock},
-		indexer:                         NewErrorIndexer(DeletionHandlingMetaNamespaceKeyFunc, indexers),
+		indexer:                         NewIndexer(DeletionHandlingMetaNamespaceKeyFunc, indexers),
 		listerWatcher:                   lw,
 		objectType:                      exampleObject,
 		resyncCheckPeriod:               defaultEventHandlerResyncPeriod,
@@ -320,7 +320,7 @@ func WaitForCacheSync(stopCh <-chan struct{}, cacheSyncs ...InformerSynced) bool
 // sharedProcessor, which is responsible for relaying those
 // notifications to each of the informer's clients.
 type sharedIndexInformer struct {
-	indexer    ErrorIndexer
+	indexer    Indexer
 	controller Controller
 
 	processor             *sharedProcessor
@@ -638,15 +638,10 @@ func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 			}
 			s.processor.distribute(deleteNotification{oldObj: d.Object}, false)
 		case Errored:
-			klog.Warningf("inside HandleDeltas Errored")
 			errObj, ok := d.Object.(error)
 			if !ok {
 				return fmt.Errorf("d.Object is not an type error: %v", d.Object)
 			}
-			// this will panic because errObj is not a runtime.Object
-			//if err := s.indexer.Error(errObj); err != nil {
-			//	return err
-			//}
 			s.processor.distribute(errorNotification{err: errObj}, false)
 		}
 	}

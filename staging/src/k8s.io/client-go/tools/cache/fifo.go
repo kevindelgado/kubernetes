@@ -45,23 +45,8 @@ func (e ErrRequeue) Error() string {
 }
 
 type ErrorQueue interface {
-	ErrorStore
-
-	Pop(PopProcessFunc) (interface{}, error)
-
-	// AddIfNotPresent puts the given accumulator into the Queue (in
-	// association with the accumulator's key) if and only if that key
-	// is not already associated with a non-empty accumulator.
-	AddIfNotPresent(interface{}) error
-
-	// HasSynced returns true if the first batch of keys have all been
-	// popped.  The first batch of keys are those of the first Replace
-	// operation if that happened before any Add, AddIfNotPresent,
-	// Update, or Delete; otherwise the first batch is empty.
-	HasSynced() bool
-
-	// Close the queue
-	Close()
+	Queue
+	Error(err error) error
 }
 
 // Queue extends Store with a collection of Store keys to "process".
@@ -171,9 +156,12 @@ func (f *FIFO) HasSynced() bool {
 	return f.populated && f.initialPopulationCount == 0
 }
 
-func (f *FIFO) Error(err error) error {
-	return nil
-}
+//func (f *FIFO) Error(err error) error {
+//	f.lock.Lock()
+//	defer f.lock.Unlock()
+//	// TODO: mimic behavior of deltatFIFO Error
+//	return nil
+//}
 
 // Add inserts an item, and puts it in the queue. The item is only enqueued
 // if it doesn't already exist in the set.

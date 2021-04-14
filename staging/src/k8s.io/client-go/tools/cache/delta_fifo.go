@@ -274,7 +274,6 @@ func (f *DeltaFIFO) HasSynced() bool {
 }
 
 func (f *DeltaFIFO) Error(err error) error {
-	klog.Warningf("deltafifo Error %v", err)
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	f.populated = true
@@ -419,15 +418,13 @@ func isDeletionDup(a, b *Delta) *Delta {
 // queueActionLocked appends to the delta list for the object.
 // Caller must lock first.
 func (f *DeltaFIFO) queueActionLocked(actionType DeltaType, obj interface{}) error {
-	klog.Warningf("queueActionLocked %s", actionType)
 	if actionType == Errored {
-		errID := "err-id"
+		errID := "err"
 		newDeltas := []Delta{Delta{actionType, obj}}
 		if _, exists := f.items[errID]; !exists {
 			f.queue = append(f.queue, errID)
 		}
 		f.items[errID] = newDeltas
-		klog.Warningf("broadcasting err %v", obj)
 		f.cond.Broadcast()
 		return nil
 	}

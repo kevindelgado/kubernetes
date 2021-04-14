@@ -322,8 +322,6 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 		case <-listCh:
 		}
 		if err != nil {
-			// the list is nil
-			klog.Warningf("list error obj %v", list)
 			return fmt.Errorf("failed to list %v: %v", r.expectedTypeName, err)
 		}
 

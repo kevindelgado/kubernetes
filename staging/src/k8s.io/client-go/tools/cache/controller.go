@@ -25,7 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/clock"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/klog/v2"
 )
 
 // This file implements a low-level controller that is used in
@@ -426,7 +425,6 @@ func newInformer(
 					}
 					h.OnDelete(d.Object)
 				case Errored:
-					klog.Warningf("inside config Procees Errored")
 					errObj, ok := d.Object.(error)
 					if !ok {
 						return fmt.Errorf("d.Object is not an type error: %v", d.Object)

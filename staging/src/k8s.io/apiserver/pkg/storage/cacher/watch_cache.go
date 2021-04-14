@@ -224,14 +224,12 @@ func newWatchCache(
 
 func (w *watchCache) Error(err error) error {
 	return nil
-	//object, resourceVersion, err := w.objectToVersionedRuntimeObject(obj)
-	//if err != nil {
-	//	return err
+	// TODO?
+	//event := watch.Event{Type: watch.Error, Object: err}
+	//f := func(elem *storeElemenet) erro {
+	//	return w.store.Error(elem)
 	//}
-	//event := watch.Event{Type: watch.Added, Object: object}
-
-	//f := func(elem *storeElement) error { return w.store.Add(elem) }
-	//return w.processEvent(event, resourceVersion, f)
+	//w.process
 }
 
 // Add takes runtime.Object as an argument.
