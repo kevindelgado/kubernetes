@@ -143,6 +143,10 @@ func (c *ExpirationCache) ListKeys() []string {
 	return c.cacheStorage.ListKeys()
 }
 
+func (c *ExpirationCache) Error(err error) error {
+	return nil
+}
+
 // Add timestamps an item and inserts it into the cache, overwriting entries
 // that might exist under the same key.
 func (c *ExpirationCache) Add(obj interface{}) error {

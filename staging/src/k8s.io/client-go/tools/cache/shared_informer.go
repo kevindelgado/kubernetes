@@ -245,7 +245,7 @@ func NewSharedIndexInformer(lw ListerWatcher, exampleObject runtime.Object, defa
 	realClock := &clock.RealClock{}
 	sharedIndexInformer := &sharedIndexInformer{
 		processor:                       &sharedProcessor{clock: realClock},
-		indexer:                         NewIndexer(DeletionHandlingMetaNamespaceKeyFunc, indexers),
+		indexer:                         NewErrorIndexer(DeletionHandlingMetaNamespaceKeyFunc, indexers),
 		listerWatcher:                   lw,
 		objectType:                      exampleObject,
 		resyncCheckPeriod:               defaultEventHandlerResyncPeriod,
@@ -320,7 +320,7 @@ func WaitForCacheSync(stopCh <-chan struct{}, cacheSyncs ...InformerSynced) bool
 // sharedProcessor, which is responsible for relaying those
 // notifications to each of the informer's clients.
 type sharedIndexInformer struct {
-	indexer    Indexer
+	indexer    ErrorIndexer
 	controller Controller
 
 	processor             *sharedProcessor
@@ -397,6 +397,10 @@ type deleteNotification struct {
 	oldObj interface{}
 }
 
+type errorNotification struct {
+	err error
+}
+
 func (s *sharedIndexInformer) SetWatchErrorHandler(handler WatchErrorHandler) error {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
@@ -425,6 +429,7 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 		KnownObjects:          s.indexer,
 		EmitDeltaTypeReplaced: true,
 	})
+	klog.Warningf("created new delta fifo, setting it on config")
 
 	cfg := &Config{
 		Queue:            fifo,
@@ -632,6 +637,17 @@ func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 				return err
 			}
 			s.processor.distribute(deleteNotification{oldObj: d.Object}, false)
+		case Errored:
+			klog.Warningf("inside HandleDeltas Errored")
+			errObj, ok := d.Object.(error)
+			if !ok {
+				return fmt.Errorf("d.Object is not an type error: %v", d.Object)
+			}
+			// this will panic because errObj is not a runtime.Object
+			//if err := s.indexer.Error(errObj); err != nil {
+			//	return err
+			//}
+			s.processor.distribute(errorNotification{err: errObj}, false)
 		}
 	}
 	return nil
@@ -935,7 +951,7 @@ func (p *processorListener) run() {
 			case deleteNotification:
 				p.handler.OnDelete(notification.oldObj)
 			case errorNotification:
-				p.handler.OnError(notification.error)
+				p.handler.OnError(notification.err)
 			default:
 				utilruntime.HandleError(fmt.Errorf("unrecognized notification: %T", next))
 			}

@@ -63,7 +63,7 @@ type Reflector struct {
 	// The GVK of the object we expect to place in the store if unstructured.
 	expectedGVK *schema.GroupVersionKind
 	// The destination to sync up with the watch source
-	store Store
+	store ErrorStore
 	// listerWatcher is used to perform lists and watches.
 	listerWatcher ListerWatcher
 
@@ -147,8 +147,8 @@ var (
 
 // NewNamespaceKeyedIndexerAndReflector creates an Indexer and a Reflector
 // The indexer is configured to key on namespace
-func NewNamespaceKeyedIndexerAndReflector(lw ListerWatcher, expectedType interface{}, resyncPeriod time.Duration) (indexer Indexer, reflector *Reflector) {
-	indexer = NewIndexer(MetaNamespaceKeyFunc, Indexers{NamespaceIndex: MetaNamespaceIndexFunc})
+func NewNamespaceKeyedIndexerAndReflector(lw ListerWatcher, expectedType interface{}, resyncPeriod time.Duration) (indexer ErrorIndexer, reflector *Reflector) {
+	indexer = NewErrorIndexer(MetaNamespaceKeyFunc, Indexers{NamespaceIndex: MetaNamespaceIndexFunc})
 	reflector = NewReflector(lw, expectedType, indexer, resyncPeriod)
 	return indexer, reflector
 }
@@ -163,12 +163,12 @@ func NewNamespaceKeyedIndexerAndReflector(lw ListerWatcher, expectedType interfa
 // "yes".  This enables you to use reflectors to periodically process
 // everything as well as incrementally processing the things that
 // change.
-func NewReflector(lw ListerWatcher, expectedType interface{}, store Store, resyncPeriod time.Duration) *Reflector {
+func NewReflector(lw ListerWatcher, expectedType interface{}, store ErrorStore, resyncPeriod time.Duration) *Reflector {
 	return NewNamedReflector(naming.GetNameFromCallsite(internalPackages...), lw, expectedType, store, resyncPeriod)
 }
 
 // NewNamedReflector same as NewReflector, but with a specified name for logging
-func NewNamedReflector(name string, lw ListerWatcher, expectedType interface{}, store Store, resyncPeriod time.Duration) *Reflector {
+func NewNamedReflector(name string, lw ListerWatcher, expectedType interface{}, store ErrorStore, resyncPeriod time.Duration) *Reflector {
 	realClock := &clock.RealClock{}
 	r := &Reflector{
 		name:          name,
@@ -220,6 +220,7 @@ func (r *Reflector) Run(stopCh <-chan struct{}) {
 	wait.BackoffUntil(func() {
 		if err := r.ListAndWatch(stopCh); err != nil {
 			r.watchErrorHandler(r, err)
+			klog.Warningf("Reflector Run calling r.store.Error with %v", err)
 			r.store.Error(err)
 		}
 	}, r.backoffManager, true, stopCh)
@@ -321,6 +322,8 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 		case <-listCh:
 		}
 		if err != nil {
+			// the list is nil
+			klog.Warningf("list error obj %v", list)
 			return fmt.Errorf("failed to list %v: %v", r.expectedTypeName, err)
 		}
 

@@ -164,7 +164,7 @@ func (gb *GraphBuilder) informerFor(resource schema.GroupVersionResource, kind s
 			gb.graphChanges.Add(event)
 		},
 		ErrorFunc: func(err error) {
-			klog.Warningf("got error for resource %q", resource)
+			klog.Warningf("GB informerFor, got error for resource %q", resource)
 			gb.monitorLock.RLock()
 			if m, ok := gb.monitors[resource]; ok {
 				if err := m.removeEventHandler(); err != nil {

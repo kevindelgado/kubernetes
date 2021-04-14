@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/clock"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog/v2"
 )
 
 // This file implements a low-level controller that is used in
@@ -40,7 +42,7 @@ type Config struct {
 	// The queue for your objects - has to be a DeltaFIFO due to
 	// assumptions in the implementation. Your Process() function
 	// should accept the output of this Queue's Pop() method.
-	Queue
+	Queue ErrorQueue
 
 	// Something that can list and watch your objects.
 	ListerWatcher
@@ -332,7 +334,7 @@ func NewInformer(
 	h ResourceEventHandler,
 ) (Store, Controller) {
 	// This will hold the client state, as we know it.
-	clientState := NewStore(DeletionHandlingMetaNamespaceKeyFunc)
+	clientState := NewErrorStore(DeletionHandlingMetaNamespaceKeyFunc)
 
 	return clientState, newInformer(lw, objType, resyncPeriod, h, clientState)
 }
@@ -361,7 +363,7 @@ func NewIndexerInformer(
 	indexers Indexers,
 ) (Indexer, Controller) {
 	// This will hold the client state, as we know it.
-	clientState := NewIndexer(DeletionHandlingMetaNamespaceKeyFunc, indexers)
+	clientState := NewErrorIndexer(DeletionHandlingMetaNamespaceKeyFunc, indexers)
 
 	return clientState, newInformer(lw, objType, resyncPeriod, h, clientState)
 }
@@ -385,7 +387,7 @@ func newInformer(
 	objType runtime.Object,
 	resyncPeriod time.Duration,
 	h ResourceEventHandler,
-	clientState Store,
+	clientState ErrorStore,
 ) Controller {
 	// This will hold incoming changes. Note how we pass clientState in as a
 	// KeyLister, that way resync operations will result in the correct set
@@ -423,7 +425,18 @@ func newInformer(
 						return err
 					}
 					h.OnDelete(d.Object)
+				case Errored:
+					klog.Warningf("inside config Procees Errored")
+					errObj, ok := d.Object.(error)
+					if !ok {
+						return fmt.Errorf("d.Object is not an type error: %v", d.Object)
+					}
+					if err := clientState.Error(errObj); err != nil {
+						return err
+					}
+					h.OnError(errObj)
 				}
+
 			}
 			return nil
 		},
