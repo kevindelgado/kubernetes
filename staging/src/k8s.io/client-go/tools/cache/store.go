@@ -70,11 +70,6 @@ type Store interface {
 	Resync() error
 }
 
-type ErrorStore interface {
-	Store
-	Error(err error) error
-}
-
 // KeyFunc knows how to make a key from an object. Implementations should be deterministic.
 type KeyFunc func(obj interface{}) (string, error)
 
@@ -176,11 +171,6 @@ func (c *cache) Delete(obj interface{}) error {
 	return nil
 }
 
-func (c *cache) Error(err error) error {
-	c.cacheStorage.Error(err)
-	return nil
-}
-
 // List returns a list of all the items.
 // List is completely threadsafe as long as you treat all items as immutable.
 func (c *cache) List() []interface{} {
@@ -259,24 +249,10 @@ func (c *cache) Resync() error {
 	return nil
 }
 
-func NewErrorStore(keyFunc KeyFunc) ErrorStore {
-	return &cache{
-		cacheStorage: NewThreadSafeStore(Indexers{}, Indices{}),
-		keyFunc:      keyFunc,
-	}
-}
-
 // NewStore returns a Store implemented simply with a map and a lock.
 func NewStore(keyFunc KeyFunc) Store {
 	return &cache{
 		cacheStorage: NewThreadSafeStore(Indexers{}, Indices{}),
-		keyFunc:      keyFunc,
-	}
-}
-
-func NewErrorIndexer(keyFunc KeyFunc, indexers Indexers) ErrorIndexer {
-	return &cache{
-		cacheStorage: NewThreadSafeStore(indexers, Indices{}),
 		keyFunc:      keyFunc,
 	}
 }

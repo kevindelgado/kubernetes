@@ -401,6 +401,13 @@ type errorNotification struct {
 	err error
 }
 
+func (s *sharedIndexInformer) handleWatchError(r *Reflector, err error) {
+	if s.watchErrorHandler != nil {
+		s.watchErrorHandler(r, err)
+	}
+	s.processor.distribute(errorNotification{err}, false)
+}
+
 func (s *sharedIndexInformer) SetWatchErrorHandler(handler WatchErrorHandler) error {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
@@ -417,11 +424,6 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 	defer utilruntime.HandleCrash()
 	zeroHandlerCtx, zeroHandlerCancel := context.WithCancel(ctx)
 	if stopOptions.StopOnZeroEventHandlers {
-		if s.EventHandlerCount() == 0 {
-			// don't even start the informer if
-			// there aren't any handlers registered.
-			return
-		}
 		s.zeroHandlerCancelFunc = zeroHandlerCancel
 	}
 
@@ -429,7 +431,6 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 		KnownObjects:          s.indexer,
 		EmitDeltaTypeReplaced: true,
 	})
-	klog.Warningf("created new delta fifo, setting it on config")
 
 	cfg := &Config{
 		Queue:            fifo,
@@ -440,7 +441,7 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 		ShouldResync:     s.processor.shouldResync,
 
 		Process:           s.HandleDeltas,
-		WatchErrorHandler: s.watchErrorHandler,
+		WatchErrorHandler: s.handleWatchError,
 	}
 
 	func() {
@@ -637,12 +638,6 @@ func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 				return err
 			}
 			s.processor.distribute(deleteNotification{oldObj: d.Object}, false)
-		case Errored:
-			errObj, ok := d.Object.(error)
-			if !ok {
-				return fmt.Errorf("d.Object is not an type error: %v", d.Object)
-			}
-			s.processor.distribute(errorNotification{err: errObj}, false)
 		}
 	}
 	return nil

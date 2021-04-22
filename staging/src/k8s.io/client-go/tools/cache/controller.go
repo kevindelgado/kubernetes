@@ -17,7 +17,6 @@ limitations under the License.
 package cache
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -41,7 +40,7 @@ type Config struct {
 	// The queue for your objects - has to be a DeltaFIFO due to
 	// assumptions in the implementation. Your Process() function
 	// should accept the output of this Queue's Pop() method.
-	Queue ErrorQueue
+	Queue
 
 	// Something that can list and watch your objects.
 	ListerWatcher
@@ -333,7 +332,7 @@ func NewInformer(
 	h ResourceEventHandler,
 ) (Store, Controller) {
 	// This will hold the client state, as we know it.
-	clientState := NewErrorStore(DeletionHandlingMetaNamespaceKeyFunc)
+	clientState := NewStore(DeletionHandlingMetaNamespaceKeyFunc)
 
 	return clientState, newInformer(lw, objType, resyncPeriod, h, clientState)
 }
@@ -362,7 +361,7 @@ func NewIndexerInformer(
 	indexers Indexers,
 ) (Indexer, Controller) {
 	// This will hold the client state, as we know it.
-	clientState := NewErrorIndexer(DeletionHandlingMetaNamespaceKeyFunc, indexers)
+	clientState := NewIndexer(DeletionHandlingMetaNamespaceKeyFunc, indexers)
 
 	return clientState, newInformer(lw, objType, resyncPeriod, h, clientState)
 }
@@ -386,7 +385,7 @@ func newInformer(
 	objType runtime.Object,
 	resyncPeriod time.Duration,
 	h ResourceEventHandler,
-	clientState ErrorStore,
+	clientState Store,
 ) Controller {
 	// This will hold incoming changes. Note how we pass clientState in as a
 	// KeyLister, that way resync operations will result in the correct set
@@ -424,15 +423,6 @@ func newInformer(
 						return err
 					}
 					h.OnDelete(d.Object)
-				case Errored:
-					errObj, ok := d.Object.(error)
-					if !ok {
-						return fmt.Errorf("d.Object is not an type error: %v", d.Object)
-					}
-					if err := clientState.Error(errObj); err != nil {
-						return err
-					}
-					h.OnError(errObj)
 				}
 
 			}

@@ -55,12 +55,6 @@ type Indexer interface {
 	AddIndexers(newIndexers Indexers) error
 }
 
-type ErrorIndexer interface {
-	Indexer
-
-	Error(err error) error
-}
-
 // IndexFunc knows how to compute the set of indexed values for an object.
 type IndexFunc func(obj interface{}) ([]string, error)
 

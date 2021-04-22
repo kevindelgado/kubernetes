@@ -44,11 +44,6 @@ func (e ErrRequeue) Error() string {
 	return e.Err.Error()
 }
 
-type ErrorQueue interface {
-	Queue
-	Error(err error) error
-}
-
 // Queue extends Store with a collection of Store keys to "process".
 // Every Add, Update, or Delete may put the object's key in that collection.
 // A Queue has a way to derive the corresponding key given an accumulator.
@@ -155,13 +150,6 @@ func (f *FIFO) HasSynced() bool {
 	defer f.lock.Unlock()
 	return f.populated && f.initialPopulationCount == 0
 }
-
-//func (f *FIFO) Error(err error) error {
-//	f.lock.Lock()
-//	defer f.lock.Unlock()
-//	// TODO: mimic behavior of deltatFIFO Error
-//	return nil
-//}
 
 // Add inserts an item, and puts it in the queue. The item is only enqueued
 // if it doesn't already exist in the set.

@@ -20,7 +20,7 @@ import (
 	"context"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -52,7 +52,7 @@ func NewPodStore(c clientset.Interface, namespace string, label labels.Selector,
 			return c.CoreV1().Pods(namespace).Watch(context.TODO(), options)
 		},
 	}
-	store := cache.NewErrorStore(cache.MetaNamespaceKeyFunc)
+	store := cache.NewStore(cache.MetaNamespaceKeyFunc)
 	stopCh := make(chan struct{})
 	reflector := cache.NewReflector(lw, &v1.Pod{}, store, 0)
 	go reflector.Run(stopCh)
