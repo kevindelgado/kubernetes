@@ -209,6 +209,9 @@ func (c *controller) processLoop() {
 //      it will get an object of type DeletedFinalStateUnknown. This can
 //      happen if the watch is closed and misses the delete event and we don't
 //      notice the deletion until the subsequent re-list.
+//  * OnError will get errors that come from the ListAndWatch when it is
+//      unable to continue receiving events and drops the connection to the
+//      apiserver with an error.
 type ResourceEventHandler interface {
 	OnAdd(obj interface{})
 	OnUpdate(oldObj, newObj interface{})
@@ -248,6 +251,7 @@ func (r ResourceEventHandlerFuncs) OnDelete(obj interface{}) {
 	}
 }
 
+// OnError calls ErrorFunc if it's not nil.
 func (r ResourceEventHandlerFuncs) OnError(err error) {
 	if r.ErrorFunc != nil {
 		r.ErrorFunc(err)
@@ -296,6 +300,7 @@ func (r FilteringResourceEventHandler) OnDelete(obj interface{}) {
 	r.Handler.OnDelete(obj)
 }
 
+// OnError calls the nested handler for all errors
 func (r FilteringResourceEventHandler) OnError(err error) {
 	r.Handler.OnError(err)
 }
@@ -424,7 +429,6 @@ func newInformer(
 					}
 					h.OnDelete(d.Object)
 				}
-
 			}
 			return nil
 		},

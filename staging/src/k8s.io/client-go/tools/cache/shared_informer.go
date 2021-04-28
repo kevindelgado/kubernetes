@@ -933,16 +933,23 @@ func (p *processorListener) run() {
 	stopCh := make(chan struct{})
 	wait.Until(func() {
 		for next := range p.nextCh {
+			klog.Warningf("processing next %v", next)
 			switch notification := next.(type) {
 			case updateNotification:
+				klog.Warningf("processing update")
 				p.handler.OnUpdate(notification.oldObj, notification.newObj)
 			case addNotification:
+				klog.Warningf("processing add")
 				p.handler.OnAdd(notification.newObj)
 			case deleteNotification:
+				klog.Warningf("processing delete")
+				klog.Warningf("obj %v", notification.oldObj)
 				p.handler.OnDelete(notification.oldObj)
 			case errorNotification:
+				klog.Warningf("processing err")
 				p.handler.OnError(notification.err)
 			default:
+				klog.Warningf("processing unknown")
 				utilruntime.HandleError(fmt.Errorf("unrecognized notification: %T", next))
 			}
 		}
