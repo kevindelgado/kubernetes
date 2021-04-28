@@ -424,11 +424,6 @@ func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOption
 	defer utilruntime.HandleCrash()
 	zeroHandlerCtx, zeroHandlerCancel := context.WithCancel(ctx)
 	if stopOptions.StopOnZeroEventHandlers {
-		if s.EventHandlerCount() == 0 {
-			// don't even start the informer if
-			// there aren't any handlers registered.
-			return
-		}
 		s.zeroHandlerCancelFunc = zeroHandlerCancel
 	}
 
@@ -695,7 +690,6 @@ func (s *sharedIndexInformer) RemoveEventHandler(handler ResourceEventHandler) e
 	defer s.blockDeltas.Unlock()
 	s.processor.removeListenerFor(handler)
 	if len(s.processor.listeners) == 0 {
-		klog.Warningf("ZERO HANDLERS")
 		if s.zeroHandlerCancelFunc != nil {
 			klog.Warningf("calling the cancel func")
 			s.zeroHandlerCancelFunc()
