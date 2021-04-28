@@ -60,6 +60,7 @@ const (
 	addEvent eventType = iota
 	updateEvent
 	deleteEvent
+	errorEvent
 )
 
 type event struct {
@@ -67,6 +68,7 @@ type event struct {
 	virtual   bool
 	eventType eventType
 	obj       interface{}
+	err       error
 	// the update event comes with an old object, but it's not used by the garbage collector.
 	oldObj interface{}
 	gvk    schema.GroupVersionKind
@@ -160,6 +162,18 @@ func (gb *GraphBuilder) informerFor(resource schema.GroupVersionResource, kind s
 				gvk:       kind,
 			}
 			gb.graphChanges.Add(event)
+		},
+		ErrorFunc: func(err error) {
+			klog.Warningf("err no-op")
+			//klog.Warningf("GB informerFor, got error for resource %q", resource)
+			//gb.monitorLock.RLock()
+			//if m, ok := gb.monitors[resource]; ok {
+			//	if err := m.removeEventHandler(); err != nil {
+			//		utilruntime.HandleError(fmt.Errorf("couldn't remove event handler for resource %q: %v", resource, err))
+			//	}
+			//	klog.Infof("removed handler for resource %q", resource)
+			//}
+			//gb.monitorLock.RUnlock()
 		},
 	}
 	shared, err := gb.sharedInformers.ForResource(resource)
