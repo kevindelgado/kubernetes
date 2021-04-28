@@ -38,6 +38,8 @@ type testListener struct {
 	resyncPeriod      time.Duration
 	expectedItemNames sets.String
 	receivedItemNames []string
+	expectedErrors    sets.String
+	receivedErrors    []string
 	name              string
 }
 
@@ -48,6 +50,10 @@ func newTestListener(name string, resyncPeriod time.Duration, expected ...string
 		name:              name,
 	}
 	return l
+}
+
+func (l *testListener) setExpectedErrors(expected ...string) {
+	l.expectedErrors = sets.NewString(expected...)
 }
 
 func (l *testListener) OnAdd(obj interface{}) {
@@ -62,6 +68,9 @@ func (l *testListener) OnDelete(obj interface{}) {
 }
 
 func (l *testListener) OnError(err error) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	l.receivedErrors = append(l.receivedErrors, err.Error())
 }
 
 func (l *testListener) handle(obj interface{}) {
@@ -97,7 +106,8 @@ func (l *testListener) satisfiedExpectations() bool {
 	l.lock.RLock()
 	defer l.lock.RUnlock()
 
-	return sets.NewString(l.receivedItemNames...).Equal(l.expectedItemNames)
+	return sets.NewString(l.receivedItemNames...).Equal(l.expectedItemNames) &&
+		sets.NewString(l.receivedErrors...).Equal(l.expectedErrors)
 }
 
 func TestListenerResyncPeriods(t *testing.T) {
@@ -327,11 +337,15 @@ func TestSharedInformerWatchDisruption(t *testing.T) {
 	clock.Step(1 * time.Second)
 
 	// Simulate a connection loss (or even just a too-old-watch)
+	expectedErr := "too old resource version: 2 (4)"
+	listenerNoResync.setExpectedErrors(expectedErr)
+	listenerResync.setExpectedErrors(expectedErr)
 	source.ResetWatch()
 
 	for _, listener := range listeners {
 		if !listener.ok() {
-			t.Errorf("%s: expected %v, got %v", listener.name, listener.expectedItemNames, listener.receivedItemNames)
+			t.Errorf("%s: expected item names %v, got %v\n expected errors %v, got %v", listener.name,
+				listener.expectedItemNames, listener.receivedItemNames, listener.expectedErrors, listener.receivedErrors)
 		}
 	}
 }
@@ -342,6 +356,8 @@ func TestSharedInformerErrorHandling(t *testing.T) {
 	source.ListError = fmt.Errorf("Access Denied")
 
 	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	listener := newTestListener("listener", 0)
+	listener.setExpectedErrors("Accesss Denied")
 
 	errCh := make(chan error)
 	_ = informer.SetWatchErrorHandler(func(_ *Reflector, err error) {
