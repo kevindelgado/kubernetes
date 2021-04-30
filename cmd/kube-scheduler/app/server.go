@@ -100,17 +100,9 @@ for more information about scheduling and the kube-scheduler component.`,
 		fs.AddFlagSet(f)
 	}
 
-	usageFmt := "Usage:\n  %s\n"
 	cols, _, _ := term.TerminalSize(cmd.OutOrStdout())
-	cmd.SetUsageFunc(func(cmd *cobra.Command) error {
-		fmt.Fprintf(cmd.OutOrStderr(), usageFmt, cmd.UseLine())
-		cliflag.PrintSections(cmd.OutOrStderr(), namedFlagSets, cols)
-		return nil
-	})
-	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		fmt.Fprintf(cmd.OutOrStdout(), "%s\n\n"+usageFmt, cmd.Long, cmd.UseLine())
-		cliflag.PrintSections(cmd.OutOrStdout(), namedFlagSets, cols)
-	})
+	cliflag.SetUsageAndHelpFunc(cmd, namedFlagSets, cols)
+
 	cmd.MarkFlagFilename("config", "yaml", "yml", "json")
 
 	return cmd
@@ -135,7 +127,7 @@ func runCommand(cmd *cobra.Command, opts *options.Options, registryOptions ...Op
 // Run executes the scheduler based on the given configuration. It only returns on error or when context is done.
 func Run(ctx context.Context, cc *schedulerserverconfig.CompletedConfig, sched *scheduler.Scheduler) error {
 	// To help debugging, immediately log version
-	klog.V(1).Infof("Starting Kubernetes Scheduler version %+v", version.Get())
+	klog.V(1).InfoS("Starting Kubernetes Scheduler version", "version", version.Get())
 
 	// Configz registration.
 	if cz, err := configz.New("componentconfig"); err == nil {
@@ -230,6 +222,7 @@ func buildHandlerChain(handler http.Handler, authn authenticator.Request, authz 
 	handler = genericapifilters.WithAuthentication(handler, authn, failedHandler, nil)
 	handler = genericapifilters.WithRequestInfo(handler, requestInfoResolver)
 	handler = genericapifilters.WithCacheControl(handler)
+	handler = genericfilters.WithHTTPLogging(handler)
 	handler = genericfilters.WithPanicRecovery(handler, requestInfoResolver)
 
 	return handler
@@ -323,6 +316,7 @@ func Setup(ctx context.Context, opts *options.Options, outOfTreeRegistryOptions 
 		cc.InformerFactory,
 		recorderFactory,
 		ctx.Done(),
+		scheduler.WithKubeConfig(cc.KubeConfig),
 		scheduler.WithProfiles(cc.ComponentConfig.Profiles...),
 		scheduler.WithAlgorithmSource(cc.ComponentConfig.AlgorithmSource),
 		scheduler.WithPercentageOfNodesToScore(cc.ComponentConfig.PercentageOfNodesToScore),

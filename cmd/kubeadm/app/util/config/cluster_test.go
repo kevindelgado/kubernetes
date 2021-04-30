@@ -18,6 +18,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -36,10 +37,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
-	"k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
+	kubeadmapiv1old "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta2"
+	kubeadmapiv1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta3"
 	"k8s.io/kubernetes/cmd/kubeadm/app/componentconfigs"
-	"k8s.io/kubernetes/cmd/kubeadm/app/constants"
 	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
 	testresources "k8s.io/kubernetes/cmd/kubeadm/test/resources"
 )
@@ -48,24 +49,24 @@ var k8sVersionString = kubeadmconstants.MinimumControlPlaneVersion.String()
 var k8sVersion = version.MustParseGeneric(k8sVersionString)
 var nodeName = "mynode"
 var cfgFiles = map[string][]byte{
-	"InitConfiguration_v1beta1": []byte(`
-apiVersion: kubeadm.k8s.io/v1beta1
+	"InitConfiguration_v1beta2": []byte(fmt.Sprintf(`
+apiVersion: %s
 kind: InitConfiguration
-`),
-	"ClusterConfiguration_v1beta1": []byte(`
-apiVersion: kubeadm.k8s.io/v1beta1
+`, kubeadmapiv1old.SchemeGroupVersion.String())),
+	"ClusterConfiguration_v1beta2": []byte(fmt.Sprintf(`
+apiVersion: %s
 kind: ClusterConfiguration
-kubernetesVersion: ` + k8sVersionString + `
-`),
-	"InitConfiguration_v1beta2": []byte(`
-apiVersion: kubeadm.k8s.io/v1beta2
+kubernetesVersion: %s
+`, kubeadmapiv1old.SchemeGroupVersion.String(), k8sVersionString)),
+	"InitConfiguration_v1beta3": []byte(fmt.Sprintf(`
+apiVersion: %s
 kind: InitConfiguration
-`),
-	"ClusterConfiguration_v1beta2": []byte(`
-apiVersion: kubeadm.k8s.io/v1beta2
+`, kubeadmapiv1.SchemeGroupVersion.String())),
+	"ClusterConfiguration_v1beta3": []byte(fmt.Sprintf(`
+apiVersion: %s
 kind: ClusterConfiguration
-kubernetesVersion: ` + k8sVersionString + `
-`),
+kubernetesVersion: %s
+`, kubeadmapiv1.SchemeGroupVersion.String(), k8sVersionString)),
 	"Kube-proxy_componentconfig": []byte(`
 apiVersion: kubeproxy.config.k8s.io/v1alpha1
 kind: KubeProxyConfiguration
@@ -496,7 +497,7 @@ func TestGetAPIEndpointWithBackoff(t *testing.T) {
 					return
 				}
 			}
-			apiEndpoint := kubeadm.APIEndpoint{}
+			apiEndpoint := kubeadmapi.APIEndpoint{}
 			err := getAPIEndpointWithBackoff(client, rt.nodeName, &apiEndpoint, wait.Backoff{Duration: 0, Jitter: 0, Steps: 1})
 			if err != nil && !rt.expectedErr {
 				t.Errorf("got error %q; was expecting no errors", err)
@@ -542,83 +543,6 @@ func TestGetInitConfigurationFromCluster(t *testing.T) {
 				},
 			},
 			expectedError: true,
-		},
-		{
-			name: "valid v1beta1 - new control plane == false", // InitConfiguration composed with data from different places, with also node specific information from ClusterStatus and node
-			staticPods: []testresources.FakeStaticPod{
-				{
-					NodeName:  nodeName,
-					Component: kubeadmconstants.KubeAPIServer,
-					Annotations: map[string]string{
-						kubeadmconstants.KubeAPIServerAdvertiseAddressEndpointAnnotationKey: "1.2.3.4:1234",
-					},
-				},
-			},
-			configMaps: []testresources.FakeConfigMap{
-				{
-					Name: kubeadmconstants.KubeadmConfigConfigMap, // ClusterConfiguration from kubeadm-config.
-					Data: map[string]string{
-						kubeadmconstants.ClusterConfigurationConfigMapKey: string(cfgFiles["ClusterConfiguration_v1beta1"]),
-					},
-				},
-				{
-					Name: kubeadmconstants.KubeProxyConfigMap, // Kube-proxy component config from corresponding ConfigMap.
-					Data: map[string]string{
-						kubeadmconstants.KubeProxyConfigMapKey: string(cfgFiles["Kube-proxy_componentconfig"]),
-					},
-				},
-				{
-					Name: kubeadmconstants.GetKubeletConfigMapName(k8sVersion), // Kubelet component config from corresponding ConfigMap.
-					Data: map[string]string{
-						kubeadmconstants.KubeletBaseConfigurationConfigMapKey: string(cfgFiles["Kubelet_componentconfig"]),
-					},
-				},
-			},
-			fileContents: kubeletConfFiles["configWithEmbeddedCert"],
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName,
-					Annotations: map[string]string{
-						kubeadmconstants.AnnotationKubeadmCRISocket: "myCRIsocket",
-					},
-				},
-				Spec: v1.NodeSpec{
-					Taints: []v1.Taint{kubeadmconstants.OldControlPlaneTaint},
-				},
-			},
-		},
-		{
-			name: "valid v1beta1 - new control plane == true", // InitConfiguration composed with data from different places, without node specific information
-			staticPods: []testresources.FakeStaticPod{
-				{
-					NodeName:  nodeName,
-					Component: kubeadmconstants.KubeAPIServer,
-					Annotations: map[string]string{
-						kubeadmconstants.KubeAPIServerAdvertiseAddressEndpointAnnotationKey: "1.2.3.4:1234",
-					},
-				},
-			},
-			configMaps: []testresources.FakeConfigMap{
-				{
-					Name: kubeadmconstants.KubeadmConfigConfigMap, // ClusterConfiguration from kubeadm-config.
-					Data: map[string]string{
-						kubeadmconstants.ClusterConfigurationConfigMapKey: string(cfgFiles["ClusterConfiguration_v1beta1"]),
-					},
-				},
-				{
-					Name: kubeadmconstants.KubeProxyConfigMap, // Kube-proxy component config from corresponding ConfigMap.
-					Data: map[string]string{
-						kubeadmconstants.KubeProxyConfigMapKey: string(cfgFiles["Kube-proxy_componentconfig"]),
-					},
-				},
-				{
-					Name: kubeadmconstants.GetKubeletConfigMapName(k8sVersion), // Kubelet component config from corresponding ConfigMap.
-					Data: map[string]string{
-						kubeadmconstants.KubeletBaseConfigurationConfigMapKey: string(cfgFiles["Kubelet_componentconfig"]),
-					},
-				},
-			},
-			newControlPlane: true,
 		},
 		{
 			name: "valid v1beta2 - new control plane == false", // InitConfiguration composed with data from different places, with also node specific information from ClusterStatus and node
@@ -680,6 +604,83 @@ func TestGetInitConfigurationFromCluster(t *testing.T) {
 					Name: kubeadmconstants.KubeadmConfigConfigMap, // ClusterConfiguration from kubeadm-config.
 					Data: map[string]string{
 						kubeadmconstants.ClusterConfigurationConfigMapKey: string(cfgFiles["ClusterConfiguration_v1beta2"]),
+					},
+				},
+				{
+					Name: kubeadmconstants.KubeProxyConfigMap, // Kube-proxy component config from corresponding ConfigMap.
+					Data: map[string]string{
+						kubeadmconstants.KubeProxyConfigMapKey: string(cfgFiles["Kube-proxy_componentconfig"]),
+					},
+				},
+				{
+					Name: kubeadmconstants.GetKubeletConfigMapName(k8sVersion), // Kubelet component config from corresponding ConfigMap.
+					Data: map[string]string{
+						kubeadmconstants.KubeletBaseConfigurationConfigMapKey: string(cfgFiles["Kubelet_componentconfig"]),
+					},
+				},
+			},
+			newControlPlane: true,
+		},
+		{
+			name: "valid v1beta3 - new control plane == false", // InitConfiguration composed with data from different places, with also node specific information from ClusterStatus and node
+			staticPods: []testresources.FakeStaticPod{
+				{
+					NodeName:  nodeName,
+					Component: kubeadmconstants.KubeAPIServer,
+					Annotations: map[string]string{
+						kubeadmconstants.KubeAPIServerAdvertiseAddressEndpointAnnotationKey: "1.2.3.4:1234",
+					},
+				},
+			},
+			configMaps: []testresources.FakeConfigMap{
+				{
+					Name: kubeadmconstants.KubeadmConfigConfigMap, // ClusterConfiguration from kubeadm-config.
+					Data: map[string]string{
+						kubeadmconstants.ClusterConfigurationConfigMapKey: string(cfgFiles["ClusterConfiguration_v1beta3"]),
+					},
+				},
+				{
+					Name: kubeadmconstants.KubeProxyConfigMap, // Kube-proxy component config from corresponding ConfigMap.
+					Data: map[string]string{
+						kubeadmconstants.KubeProxyConfigMapKey: string(cfgFiles["Kube-proxy_componentconfig"]),
+					},
+				},
+				{
+					Name: kubeadmconstants.GetKubeletConfigMapName(k8sVersion), // Kubelet component config from corresponding ConfigMap.
+					Data: map[string]string{
+						kubeadmconstants.KubeletBaseConfigurationConfigMapKey: string(cfgFiles["Kubelet_componentconfig"]),
+					},
+				},
+			},
+			fileContents: kubeletConfFiles["configWithEmbeddedCert"],
+			node: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Annotations: map[string]string{
+						kubeadmconstants.AnnotationKubeadmCRISocket: "myCRIsocket",
+					},
+				},
+				Spec: v1.NodeSpec{
+					Taints: []v1.Taint{kubeadmconstants.OldControlPlaneTaint},
+				},
+			},
+		},
+		{
+			name: "valid v1beta3 - new control plane == true", // InitConfiguration composed with data from different places, without node specific information
+			staticPods: []testresources.FakeStaticPod{
+				{
+					NodeName:  nodeName,
+					Component: kubeadmconstants.KubeAPIServer,
+					Annotations: map[string]string{
+						kubeadmconstants.KubeAPIServerAdvertiseAddressEndpointAnnotationKey: "1.2.3.4:1234",
+					},
+				},
+			},
+			configMaps: []testresources.FakeConfigMap{
+				{
+					Name: kubeadmconstants.KubeadmConfigConfigMap, // ClusterConfiguration from kubeadm-config.
+					Data: map[string]string{
+						kubeadmconstants.ClusterConfigurationConfigMapKey: string(cfgFiles["ClusterConfiguration_v1beta3"]),
 					},
 				},
 				{
@@ -776,23 +777,23 @@ func TestGetGetClusterStatus(t *testing.T) {
 			name: "invalid missing config map",
 		},
 		{
-			name: "valid v1beta1",
-			configMaps: []testresources.FakeConfigMap{
-				{
-					Name: kubeadmconstants.KubeadmConfigConfigMap,
-					Data: map[string]string{
-						kubeadmconstants.ClusterStatusConfigMapKey: string(cfgFiles["ClusterStatus_v1beta1"]),
-					},
-				},
-			},
-		},
-		{
 			name: "valid v1beta2",
 			configMaps: []testresources.FakeConfigMap{
 				{
 					Name: kubeadmconstants.KubeadmConfigConfigMap,
 					Data: map[string]string{
 						kubeadmconstants.ClusterStatusConfigMapKey: string(cfgFiles["ClusterStatus_v1beta2"]),
+					},
+				},
+			},
+		},
+		{
+			name: "valid v1beta3",
+			configMaps: []testresources.FakeConfigMap{
+				{
+					Name: kubeadmconstants.KubeadmConfigConfigMap,
+					Data: map[string]string{
+						kubeadmconstants.ClusterStatusConfigMapKey: string(cfgFiles["ClusterStatus_v1beta3"]),
 					},
 				},
 			},
@@ -859,7 +860,7 @@ func TestGetAPIEndpointFromPodAnnotation(t *testing.T) {
 			nodeName: nodeName,
 			pods: []testresources.FakeStaticPod{
 				{
-					Component:   constants.KubeAPIServer,
+					Component:   kubeadmconstants.KubeAPIServer,
 					Annotations: map[string]string{kubeadmconstants.KubeAPIServerAdvertiseAddressEndpointAnnotationKey: "1.2.3.4:1234"},
 				},
 			},
@@ -875,7 +876,7 @@ func TestGetAPIEndpointFromPodAnnotation(t *testing.T) {
 			nodeName: nodeName,
 			pods: []testresources.FakeStaticPod{
 				{
-					Component:   constants.KubeAPIServer,
+					Component:   kubeadmconstants.KubeAPIServer,
 					Annotations: map[string]string{kubeadmconstants.KubeAPIServerAdvertiseAddressEndpointAnnotationKey: "1.2.3.4:1234"},
 				},
 			},
@@ -937,7 +938,7 @@ func TestGetRawAPIEndpointFromPodAnnotationWithoutRetry(t *testing.T) {
 			nodeName: nodeName,
 			pods: []testresources.FakeStaticPod{
 				{
-					Component:   constants.KubeAPIServer,
+					Component:   kubeadmconstants.KubeAPIServer,
 					Annotations: map[string]string{kubeadmconstants.KubeAPIServerAdvertiseAddressEndpointAnnotationKey: "1.2.3.4:1234"},
 				},
 			},
@@ -948,11 +949,11 @@ func TestGetRawAPIEndpointFromPodAnnotationWithoutRetry(t *testing.T) {
 			nodeName: nodeName,
 			pods: []testresources.FakeStaticPod{
 				{
-					Component:   constants.KubeAPIServer,
+					Component:   kubeadmconstants.KubeAPIServer,
 					Annotations: map[string]string{kubeadmconstants.KubeAPIServerAdvertiseAddressEndpointAnnotationKey: "1.2.3.4:1234"},
 				},
 				{
-					Component: constants.KubeAPIServer,
+					Component: kubeadmconstants.KubeAPIServer,
 				},
 			},
 			expectedErr: true,
@@ -962,11 +963,11 @@ func TestGetRawAPIEndpointFromPodAnnotationWithoutRetry(t *testing.T) {
 			nodeName: nodeName,
 			pods: []testresources.FakeStaticPod{
 				{
-					Component:   constants.KubeAPIServer,
+					Component:   kubeadmconstants.KubeAPIServer,
 					Annotations: map[string]string{kubeadmconstants.KubeAPIServerAdvertiseAddressEndpointAnnotationKey: "1.2.3.4:1234"},
 				},
 				{
-					Component:   constants.KubeAPIServer,
+					Component:   kubeadmconstants.KubeAPIServer,
 					Annotations: map[string]string{kubeadmconstants.KubeAPIServerAdvertiseAddressEndpointAnnotationKey: "1.2.3.5:1234"},
 				},
 			},
@@ -977,10 +978,10 @@ func TestGetRawAPIEndpointFromPodAnnotationWithoutRetry(t *testing.T) {
 			nodeName: nodeName,
 			pods: []testresources.FakeStaticPod{
 				{
-					Component: constants.KubeAPIServer,
+					Component: kubeadmconstants.KubeAPIServer,
 				},
 				{
-					Component: constants.KubeAPIServer,
+					Component: kubeadmconstants.KubeAPIServer,
 				},
 			},
 			expectedErr: true,
@@ -990,7 +991,7 @@ func TestGetRawAPIEndpointFromPodAnnotationWithoutRetry(t *testing.T) {
 			nodeName: nodeName,
 			pods: []testresources.FakeStaticPod{
 				{
-					Component:   constants.KubeAPIServer,
+					Component:   kubeadmconstants.KubeAPIServer,
 					Annotations: map[string]string{kubeadmconstants.KubeAPIServerAdvertiseAddressEndpointAnnotationKey: "1.2.3.4:1234"},
 				},
 			},

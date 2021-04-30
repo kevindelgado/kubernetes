@@ -160,17 +160,8 @@ cluster's shared state through which all other components interact.`,
 		fs.AddFlagSet(f)
 	}
 
-	usageFmt := "Usage:\n  %s\n"
 	cols, _, _ := term.TerminalSize(cmd.OutOrStdout())
-	cmd.SetUsageFunc(func(cmd *cobra.Command) error {
-		fmt.Fprintf(cmd.OutOrStderr(), usageFmt, cmd.UseLine())
-		cliflag.PrintSections(cmd.OutOrStderr(), namedFlagSets, cols)
-		return nil
-	})
-	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		fmt.Fprintf(cmd.OutOrStdout(), "%s\n\n"+usageFmt, cmd.Long, cmd.UseLine())
-		cliflag.PrintSections(cmd.OutOrStdout(), namedFlagSets, cols)
-	})
+	cliflag.SetUsageAndHelpFunc(cmd, namedFlagSets, cols)
 
 	return cmd
 }
@@ -330,21 +321,6 @@ func CreateKubeAPIServerConfig(
 
 	s.Logs.Apply()
 
-	serviceIPRange, apiServerServiceIP, err := controlplane.ServiceIPRange(s.PrimaryServiceClusterIPRange)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	// defaults to empty range and ip
-	var secondaryServiceIPRange net.IPNet
-	// process secondary range only if provided by user
-	if s.SecondaryServiceClusterIPRange.IP != nil {
-		secondaryServiceIPRange, _, err = controlplane.ServiceIPRange(s.SecondaryServiceClusterIPRange)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-	}
-
 	config := &controlplane.Config{
 		GenericConfig: genericConfig,
 		ExtraConfig: controlplane.ExtraConfig{
@@ -357,9 +333,9 @@ func CreateKubeAPIServerConfig(
 
 			Tunneler: nodeTunneler,
 
-			ServiceIPRange:          serviceIPRange,
-			APIServerServiceIP:      apiServerServiceIP,
-			SecondaryServiceIPRange: secondaryServiceIPRange,
+			ServiceIPRange:          s.PrimaryServiceClusterIPRange,
+			APIServerServiceIP:      s.APIServerServiceIP,
+			SecondaryServiceIPRange: s.SecondaryServiceClusterIPRange,
 
 			APIServerServicePort: 443,
 
@@ -431,7 +407,7 @@ func CreateKubeAPIServerConfig(
 		pubKeys = append(pubKeys, keys...)
 	}
 	// Plumb the required metadata through ExtraConfig.
-	config.ExtraConfig.ServiceAccountIssuerURL = s.Authentication.ServiceAccounts.Issuer
+	config.ExtraConfig.ServiceAccountIssuerURL = s.Authentication.ServiceAccounts.Issuers[0]
 	config.ExtraConfig.ServiceAccountJWKSURI = s.Authentication.ServiceAccounts.JWKSURI
 	config.ExtraConfig.ServiceAccountPublicKeys = pubKeys
 
@@ -611,6 +587,7 @@ func Complete(s *options.ServerRunOptions) (completedServerRunOptions, error) {
 	}
 	s.PrimaryServiceClusterIPRange = primaryServiceIPRange
 	s.SecondaryServiceClusterIPRange = secondaryServiceIPRange
+	s.APIServerServiceIP = apiServerServiceIP
 
 	if err := s.SecureServing.MaybeDefaultWithSelfSignedCerts(s.GenericServerRunOptions.AdvertiseAddress.String(), []string{"kubernetes.default.svc", "kubernetes.default", "kubernetes"}, []net.IP{apiServerServiceIP}); err != nil {
 		return options, fmt.Errorf("error creating self-signed certificates: %v", err)
@@ -647,7 +624,7 @@ func Complete(s *options.ServerRunOptions) (completedServerRunOptions, error) {
 		}
 	}
 
-	if s.ServiceAccountSigningKeyFile != "" && s.Authentication.ServiceAccounts.Issuer != "" {
+	if s.ServiceAccountSigningKeyFile != "" && len(s.Authentication.ServiceAccounts.Issuers) != 0 && s.Authentication.ServiceAccounts.Issuers[0] != "" {
 		sk, err := keyutil.PrivateKeyFromFile(s.ServiceAccountSigningKeyFile)
 		if err != nil {
 			return options, fmt.Errorf("failed to parse service-account-issuer-key-file: %v", err)
@@ -669,7 +646,7 @@ func Complete(s *options.ServerRunOptions) (completedServerRunOptions, error) {
 			}
 		}
 
-		s.ServiceAccountIssuer, err = serviceaccount.JWTTokenGenerator(s.Authentication.ServiceAccounts.Issuer, sk)
+		s.ServiceAccountIssuer, err = serviceaccount.JWTTokenGenerator(s.Authentication.ServiceAccounts.Issuers[0], sk)
 		if err != nil {
 			return options, fmt.Errorf("failed to build token generator: %v", err)
 		}
@@ -692,18 +669,17 @@ func Complete(s *options.ServerRunOptions) (completedServerRunOptions, error) {
 		}
 	}
 
-	if s.APIEnablement.RuntimeConfig != nil {
-		for key, value := range s.APIEnablement.RuntimeConfig {
-			if key == "v1" || strings.HasPrefix(key, "v1/") ||
-				key == "api/v1" || strings.HasPrefix(key, "api/v1/") {
-				delete(s.APIEnablement.RuntimeConfig, key)
-				s.APIEnablement.RuntimeConfig["/v1"] = value
-			}
-			if key == "api/legacy" {
-				delete(s.APIEnablement.RuntimeConfig, key)
-			}
+	for key, value := range s.APIEnablement.RuntimeConfig {
+		if key == "v1" || strings.HasPrefix(key, "v1/") ||
+			key == "api/v1" || strings.HasPrefix(key, "api/v1/") {
+			delete(s.APIEnablement.RuntimeConfig, key)
+			s.APIEnablement.RuntimeConfig["/v1"] = value
+		}
+		if key == "api/legacy" {
+			delete(s.APIEnablement.RuntimeConfig, key)
 		}
 	}
+
 	options.ServerRunOptions = s
 	return options, nil
 }
@@ -747,16 +723,14 @@ func getServiceIPAndRanges(serviceClusterIPRanges string) (net.IP, net.IPNet, ne
 		return apiServerServiceIP, primaryServiceIPRange, net.IPNet{}, nil
 	}
 
-	if len(serviceClusterIPRangeList) > 0 {
-		_, primaryServiceClusterCIDR, err := net.ParseCIDR(serviceClusterIPRangeList[0])
-		if err != nil {
-			return net.IP{}, net.IPNet{}, net.IPNet{}, fmt.Errorf("service-cluster-ip-range[0] is not a valid cidr")
-		}
+	_, primaryServiceClusterCIDR, err := net.ParseCIDR(serviceClusterIPRangeList[0])
+	if err != nil {
+		return net.IP{}, net.IPNet{}, net.IPNet{}, fmt.Errorf("service-cluster-ip-range[0] is not a valid cidr")
+	}
 
-		primaryServiceIPRange, apiServerServiceIP, err = controlplane.ServiceIPRange(*(primaryServiceClusterCIDR))
-		if err != nil {
-			return net.IP{}, net.IPNet{}, net.IPNet{}, fmt.Errorf("error determining service IP ranges for primary service cidr: %v", err)
-		}
+	primaryServiceIPRange, apiServerServiceIP, err = controlplane.ServiceIPRange(*(primaryServiceClusterCIDR))
+	if err != nil {
+		return net.IP{}, net.IPNet{}, net.IPNet{}, fmt.Errorf("error determining service IP ranges for primary service cidr: %v", err)
 	}
 
 	// user provided at least two entries

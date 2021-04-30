@@ -38,6 +38,7 @@ type NodeAffinity struct {
 
 var _ framework.FilterPlugin = &NodeAffinity{}
 var _ framework.ScorePlugin = &NodeAffinity{}
+var _ framework.EnqueueExtensions = &NodeAffinity{}
 
 const (
 	// Name is the name of the plugin used in the plugin registry and configurations.
@@ -68,6 +69,14 @@ type preFilterState struct {
 // Clone just returns the same state because it is not affected by pod additions or deletions.
 func (s *preFilterState) Clone() framework.StateData {
 	return s
+}
+
+// EventsToRegister returns the possible events that may make a Pod
+// failed by this plugin schedulable.
+func (pl *NodeAffinity) EventsToRegister() []framework.ClusterEvent {
+	return []framework.ClusterEvent{
+		{Resource: framework.Node, ActionType: framework.Add | framework.UpdateNodeLabel},
+	}
 }
 
 // PreFilter builds and writes cycle state used by Filter.
@@ -216,7 +225,7 @@ func getArgs(obj runtime.Object) (config.NodeAffinityArgs, error) {
 	if !ok {
 		return config.NodeAffinityArgs{}, fmt.Errorf("args are not of type NodeAffinityArgs, got %T", obj)
 	}
-	return *ptr, validation.ValidateNodeAffinityArgs(ptr)
+	return *ptr, validation.ValidateNodeAffinityArgs(nil, ptr)
 }
 
 func getPodPreferredNodeAffinity(pod *v1.Pod) (*nodeaffinity.PreferredSchedulingTerms, error) {

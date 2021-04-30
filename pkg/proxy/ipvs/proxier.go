@@ -300,7 +300,8 @@ type realIPGetter struct {
 // 172.17.0.1 dev docker0  scope host  src 172.17.0.1
 // 192.168.122.1 dev virbr0  scope host  src 192.168.122.1
 // Then filter out dev==kube-ipvs0, and cut the unique src IP fields,
-// Node IP set: [100.106.89.164, 127.0.0.1, 172.17.0.1, 192.168.122.1]
+// Node IP set: [100.106.89.164, 172.17.0.1, 192.168.122.1]
+// Note that loopback addresses are excluded.
 func (r *realIPGetter) NodeIPs() (ips []net.IP, err error) {
 	// Pass in empty filter device name for list all LOCAL type addresses.
 	nodeAddress, err := r.nl.GetLocalAddresses("", DefaultDummyDevice)
@@ -309,7 +310,11 @@ func (r *realIPGetter) NodeIPs() (ips []net.IP, err error) {
 	}
 	// translate ip string to IP
 	for _, ipStr := range nodeAddress.UnsortedList() {
-		ips = append(ips, net.ParseIP(ipStr))
+		a := net.ParseIP(ipStr)
+		if a.IsLoopback() {
+			continue
+		}
+		ips = append(ips, a)
 	}
 	return ips, nil
 }
@@ -321,21 +326,6 @@ func (r *realIPGetter) BindedIPs() (sets.String, error) {
 
 // Proxier implements proxy.Provider
 var _ proxy.Provider = &Proxier{}
-
-// parseExcludedCIDRs parses the input strings and returns net.IPNet
-// The validation has been done earlier so the error condition will never happen under normal conditions
-func parseExcludedCIDRs(excludeCIDRs []string) []*net.IPNet {
-	var cidrExclusions []*net.IPNet
-	for _, excludedCIDR := range excludeCIDRs {
-		_, n, err := net.ParseCIDR(excludedCIDR)
-		if err != nil {
-			klog.Errorf("Error parsing exclude CIDR %q,  err: %v", excludedCIDR, err)
-			continue
-		}
-		cidrExclusions = append(cidrExclusions, n)
-	}
-	return cidrExclusions
-}
 
 // NewProxier returns a new Proxier given an iptables and ipvs Interface instance.
 // Because of the iptables and ipvs logic, it is assumed that there is only a single Proxier active on a machine.
@@ -457,6 +447,9 @@ func NewProxier(ipt utiliptables.Interface,
 		klog.Warningf("IP Family: %s, NodePortAddresses of wrong family; %s", ipFamily, strings.Join(ips, ","))
 	}
 
+	// excludeCIDRs has been validated before, here we just parse it to IPNet list
+	parsedExcludeCIDRs, _ := utilnet.ParseCIDRs(excludeCIDRs)
+
 	proxier := &Proxier{
 		ipFamily:              ipFamily,
 		portsMap:              make(map[utilnet.LocalPort]utilnet.Closeable),
@@ -466,7 +459,7 @@ func NewProxier(ipt utiliptables.Interface,
 		endpointsChanges:      proxy.NewEndpointChangeTracker(hostname, nil, ipFamily, recorder, endpointSlicesEnabled, nil),
 		syncPeriod:            syncPeriod,
 		minSyncPeriod:         minSyncPeriod,
-		excludeCIDRs:          parseExcludedCIDRs(excludeCIDRs),
+		excludeCIDRs:          parsedExcludeCIDRs,
 		iptables:              ipt,
 		masqueradeAll:         masqueradeAll,
 		masqueradeMark:        masqueradeMark,
@@ -976,8 +969,12 @@ func (proxier *Proxier) OnNodeAdd(node *v1.Node) {
 	}
 
 	proxier.mu.Lock()
-	proxier.nodeLabels = node.Labels
+	proxier.nodeLabels = map[string]string{}
+	for k, v := range node.Labels {
+		proxier.nodeLabels[k] = v
+	}
 	proxier.mu.Unlock()
+	klog.V(4).InfoS("Updated proxier node labels", "labels", node.Labels)
 
 	proxier.syncProxyRules()
 }
@@ -995,8 +992,12 @@ func (proxier *Proxier) OnNodeUpdate(oldNode, node *v1.Node) {
 	}
 
 	proxier.mu.Lock()
-	proxier.nodeLabels = node.Labels
+	proxier.nodeLabels = map[string]string{}
+	for k, v := range node.Labels {
+		proxier.nodeLabels[k] = v
+	}
 	proxier.mu.Unlock()
+	klog.V(4).InfoS("Updated proxier node labels", "labels", node.Labels)
 
 	proxier.syncProxyRules()
 }
@@ -1131,6 +1132,10 @@ func (proxier *Proxier) syncProxyRules() {
 		} else {
 			nodeAddresses = nodeAddrSet.List()
 			for _, address := range nodeAddresses {
+				a := net.ParseIP(address)
+				if a.IsLoopback() {
+					continue
+				}
 				if utilproxy.IsZeroCIDR(address) {
 					nodeIPs, err = proxier.ipGetter.NodeIPs()
 					if err != nil {
@@ -1138,7 +1143,7 @@ func (proxier *Proxier) syncProxyRules() {
 					}
 					break
 				}
-				nodeIPs = append(nodeIPs, net.ParseIP(address))
+				nodeIPs = append(nodeIPs, a)
 			}
 		}
 	}
@@ -1263,7 +1268,7 @@ func (proxier *Proxier) syncProxyRules() {
 				} else {
 					socket, err := proxier.portMapper.OpenLocalPort(&lp)
 					if err != nil {
-						msg := fmt.Sprintf("can't open %s, skipping this externalIP: %v", lp.String(), err)
+						msg := fmt.Sprintf("can't open port %s, skipping it", lp.String())
 
 						proxier.recorder.Eventf(
 							&v1.ObjectReference{
@@ -1272,7 +1277,7 @@ func (proxier *Proxier) syncProxyRules() {
 								UID:       types.UID(proxier.hostname),
 								Namespace: "",
 							}, v1.EventTypeWarning, err.Error(), msg)
-						klog.Error(msg)
+						klog.ErrorS(err, "can't open port, skipping it", "port", lp.String())
 						continue
 					}
 					klog.V(2).Infof("Opened local port %s", lp.String())
@@ -1466,7 +1471,16 @@ func (proxier *Proxier) syncProxyRules() {
 				} else if svcInfo.Protocol() != v1.ProtocolSCTP {
 					socket, err := proxier.portMapper.OpenLocalPort(&lp)
 					if err != nil {
-						klog.Errorf("can't open %s, skipping this nodePort: %v", lp.String(), err)
+						msg := fmt.Sprintf("can't open port %s, skipping it", lp.String())
+
+						proxier.recorder.Eventf(
+							&v1.ObjectReference{
+								Kind:      "Node",
+								Name:      proxier.hostname,
+								UID:       types.UID(proxier.hostname),
+								Namespace: "",
+							}, v1.EventTypeWarning, err.Error(), msg)
+						klog.ErrorS(err, "can't open port, skipping it", "port", lp.String())
 						continue
 					}
 					klog.V(2).Infof("Opened local port %s", lp.String())

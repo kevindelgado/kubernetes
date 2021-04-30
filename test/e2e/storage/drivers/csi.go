@@ -48,6 +48,7 @@ import (
 	"github.com/onsi/ginkgo"
 	"google.golang.org/grpc/codes"
 	v1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -142,7 +143,12 @@ func InitHostPathCSIDriver() storageframework.TestDriver {
 		storageframework.CapPVCDataSource:       true,
 		storageframework.CapControllerExpansion: true,
 		storageframework.CapSingleNodeVolume:    true,
-		storageframework.CapVolumeLimits:        true,
+
+		// This is needed for the
+		// testsuites/volumelimits.go `should support volume limits`
+		// test. --maxvolumespernode=10 gets
+		// added when patching the deployment.
+		storageframework.CapVolumeLimits: true,
 	}
 	return initHostPathCSIDriver("csi-hostpath",
 		capabilities,
@@ -152,7 +158,8 @@ func InitHostPathCSIDriver() storageframework.TestDriver {
 		},
 		"test/e2e/testing-manifests/storage-csi/external-attacher/rbac.yaml",
 		"test/e2e/testing-manifests/storage-csi/external-provisioner/rbac.yaml",
-		"test/e2e/testing-manifests/storage-csi/external-snapshotter/rbac.yaml",
+		"test/e2e/testing-manifests/storage-csi/external-snapshotter/csi-snapshotter/rbac-csi-snapshotter.yaml",
+		"test/e2e/testing-manifests/storage-csi/external-health-monitor/external-health-monitor-controller/rbac.yaml",
 		"test/e2e/testing-manifests/storage-csi/external-resizer/rbac.yaml",
 		"test/e2e/testing-manifests/storage-csi/hostpath/hostpath/csi-hostpath-attacher.yaml",
 		"test/e2e/testing-manifests/storage-csi/hostpath/hostpath/csi-hostpath-driverinfo.yaml",
@@ -193,9 +200,8 @@ func (h *hostpathCSIDriver) GetCSIDriverName(config *storageframework.PerTestCon
 func (h *hostpathCSIDriver) GetSnapshotClass(config *storageframework.PerTestConfig, parameters map[string]string) *unstructured.Unstructured {
 	snapshotter := config.GetUniqueDriverName()
 	ns := config.Framework.Namespace.Name
-	suffix := fmt.Sprintf("%s-vsc", snapshotter)
 
-	return utils.GenerateSnapshotClassSpec(snapshotter, parameters, ns, suffix)
+	return utils.GenerateSnapshotClassSpec(snapshotter, parameters, ns)
 }
 
 func (h *hostpathCSIDriver) PrepareTest(f *framework.Framework) (*storageframework.PerTestConfig, func()) {
@@ -220,10 +226,15 @@ func (h *hostpathCSIDriver) PrepareTest(f *framework.Framework) (*storageframewo
 	}
 
 	o := utils.PatchCSIOptions{
-		OldDriverName:            h.driverInfo.Name,
-		NewDriverName:            config.GetUniqueDriverName(),
-		DriverContainerName:      "hostpath",
-		DriverContainerArguments: []string{"--drivername=" + config.GetUniqueDriverName()},
+		OldDriverName:       h.driverInfo.Name,
+		NewDriverName:       config.GetUniqueDriverName(),
+		DriverContainerName: "hostpath",
+		DriverContainerArguments: []string{"--drivername=" + config.GetUniqueDriverName(),
+			// This is needed for the
+			// testsuites/volumelimits.go `should support volume limits`
+			// test.
+			"--maxvolumespernode=10",
+		},
 		ProvisionerContainerName: "csi-provisioner",
 		SnapshotterContainerName: "csi-snapshotter",
 		NodeName:                 node.Name,
@@ -408,7 +419,7 @@ func InitMockCSIDriver(driverOpts CSIMockDriverOpts) MockCSITestDriver {
 		"test/e2e/testing-manifests/storage-csi/external-attacher/rbac.yaml",
 		"test/e2e/testing-manifests/storage-csi/external-provisioner/rbac.yaml",
 		"test/e2e/testing-manifests/storage-csi/external-resizer/rbac.yaml",
-		"test/e2e/testing-manifests/storage-csi/external-snapshotter/rbac.yaml",
+		"test/e2e/testing-manifests/storage-csi/external-snapshotter/csi-snapshotter/rbac-csi-snapshotter.yaml",
 		"test/e2e/testing-manifests/storage-csi/mock/csi-mock-rbac.yaml",
 		"test/e2e/testing-manifests/storage-csi/mock/csi-storageclass.yaml",
 	}
@@ -482,9 +493,8 @@ func (m *mockCSIDriver) GetDynamicProvisionStorageClass(config *storageframework
 func (m *mockCSIDriver) GetSnapshotClass(config *storageframework.PerTestConfig, parameters map[string]string) *unstructured.Unstructured {
 	snapshotter := m.driverInfo.Name + "-" + config.Framework.UniqueName
 	ns := config.Framework.Namespace.Name
-	suffix := fmt.Sprintf("%s-vsc", snapshotter)
 
-	return utils.GenerateSnapshotClassSpec(snapshotter, parameters, ns, suffix)
+	return utils.GenerateSnapshotClassSpec(snapshotter, parameters, ns)
 }
 
 func (m *mockCSIDriver) PrepareTest(f *framework.Framework) (*storageframework.PerTestConfig, func()) {
@@ -611,7 +621,25 @@ func (m *mockCSIDriver) PrepareTest(f *framework.Framework) (*storageframework.P
 		FSGroupPolicy:     m.fsGroupPolicy,
 	}
 	cleanup, err := utils.CreateFromManifests(f, m.driverNamespace, func(item interface{}) error {
-		return utils.PatchCSIDeployment(f, o, item)
+		if err := utils.PatchCSIDeployment(config.Framework, o, item); err != nil {
+			return err
+		}
+
+		switch item := item.(type) {
+		case *rbacv1.ClusterRole:
+			if strings.HasPrefix(item.Name, "external-snapshotter-runner") {
+				// Re-enable access to secrets for the snapshotter sidecar for
+				// https://github.com/kubernetes/kubernetes/blob/6ede5ca95f78478fa627ecfea8136e0dff34436b/test/e2e/storage/csi_mock_volume.go#L1539-L1548
+				// It was disabled in https://github.com/kubernetes-csi/external-snapshotter/blob/501cc505846c03ee665355132f2da0ce7d5d747d/deploy/kubernetes/csi-snapshotter/rbac-csi-snapshotter.yaml#L26-L32
+				item.Rules = append(item.Rules, rbacv1.PolicyRule{
+					APIGroups: []string{""},
+					Resources: []string{"secrets"},
+					Verbs:     []string{"get", "list"},
+				})
+			}
+		}
+
+		return nil
 	}, m.manifests...)
 
 	if err != nil {
@@ -790,9 +818,8 @@ func (g *gcePDCSIDriver) GetDynamicProvisionStorageClass(config *storageframewor
 func (g *gcePDCSIDriver) GetSnapshotClass(config *storageframework.PerTestConfig, parameters map[string]string) *unstructured.Unstructured {
 	snapshotter := g.driverInfo.Name
 	ns := config.Framework.Namespace.Name
-	suffix := fmt.Sprintf("%s-vsc", snapshotter)
 
-	return utils.GenerateSnapshotClassSpec(snapshotter, parameters, ns, suffix)
+	return utils.GenerateSnapshotClassSpec(snapshotter, parameters, ns)
 }
 
 func (g *gcePDCSIDriver) PrepareTest(f *framework.Framework) (*storageframework.PerTestConfig, func()) {

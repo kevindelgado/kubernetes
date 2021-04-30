@@ -17,16 +17,19 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
+
+	"k8s.io/utils/buffer"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/clock"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/utils/buffer"
 
 	"k8s.io/klog/v2"
 )
@@ -150,12 +153,24 @@ type SharedInformer interface {
 	// because the implementation takes time to do work and there may
 	// be competing load and scheduling noise.
 	AddEventHandlerWithResyncPeriod(handler ResourceEventHandler, resyncPeriod time.Duration)
+	// RemoveEventHandler removes a formerly added event handler, again.
+	// It is possible to remove only event handlers that are (go) comparable,
+	// This means event handlers like ResourceEventHandlerFuncs cannot be removed
+	// if added by value and not by reference, because they contain function pointers
+	// that are not comparable in go. Trying to remove an uncomparable handler
+	// results in an appropriate error.
+	// Please note: If, for some reason, the same handler has been added multiple
+	// times, all registrations will be removed.
+	RemoveEventHandler(handler ResourceEventHandler) error
 	// GetStore returns the informer's local cache as a Store.
 	GetStore() Store
 	// GetController is deprecated, it does nothing useful
 	GetController() Controller
-	// Run starts and runs the shared informer, returning after it stops.
-	// The informer will be stopped when stopCh is closed.
+	// RunWithStopOptions starts and runs the shared informer, returning after it stops.
+	// The informer will be stopped when a stopOptions condition is met.
+	RunWithStopOptions(ctx context.Context, stopOptions StopOptions)
+	// Run supports the legacy way interface for running shared index informers
+	// with just a stop channel.
 	Run(stopCh <-chan struct{})
 	// HasSynced returns true if the shared informer's store has been
 	// informed by at least one full LIST of the authoritative state
@@ -180,6 +195,25 @@ type SharedInformer interface {
 	// The handler should return quickly - any expensive processing should be
 	// offloaded.
 	SetWatchErrorHandler(handler WatchErrorHandler) error
+
+	// EventHandlerCount return the number of actually registered
+	// event handlers.
+	EventHandlerCount() int
+
+	// IsStopped reports whether the informer has already been stopped
+	// Adding event handlers to already stopped informers is not possible
+	// and is silently ignored.
+	IsStopped() bool
+
+	// IsStarted reports whether the informer has already been started
+	IsStarted() bool
+}
+
+// StopOptions let the caller specify which conditions to stop the informer.
+type StopOptions struct {
+	// StopOnZeroEventHandlers, if true, stops the informer when it no longer has any
+	// event handlers registered for it.
+	StopOnZeroEventHandlers bool
 }
 
 // SharedIndexInformer provides add and get Indexers ability based on SharedInformer.
@@ -318,6 +352,9 @@ type sharedIndexInformer struct {
 
 	// Called whenever the ListAndWatch drops the connection with an error.
 	watchErrorHandler WatchErrorHandler
+
+	// zeroHandlerCancelFunc allows for stopping the informer because no event handlers are registered.
+	zeroHandlerCancelFunc context.CancelFunc
 }
 
 // dummyController hides the fact that a SharedInformer is different from a dedicated one
@@ -330,6 +367,9 @@ type dummyController struct {
 }
 
 func (v *dummyController) Run(stopCh <-chan struct{}) {
+}
+
+func (v *dummyController) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
 }
 
 func (v *dummyController) HasSynced() bool {
@@ -353,6 +393,17 @@ type deleteNotification struct {
 	oldObj interface{}
 }
 
+type errorNotification struct {
+	err error
+}
+
+func (s *sharedIndexInformer) handleWatchError(r *Reflector, err error) {
+	if s.watchErrorHandler != nil {
+		s.watchErrorHandler(r, err)
+	}
+	s.processor.distribute(errorNotification{err}, false)
+}
+
 func (s *sharedIndexInformer) SetWatchErrorHandler(handler WatchErrorHandler) error {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
@@ -365,8 +416,12 @@ func (s *sharedIndexInformer) SetWatchErrorHandler(handler WatchErrorHandler) er
 	return nil
 }
 
-func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
+func (s *sharedIndexInformer) RunWithStopOptions(ctx context.Context, stopOptions StopOptions) {
 	defer utilruntime.HandleCrash()
+	zeroHandlerCtx, zeroHandlerCancel := context.WithCancel(ctx)
+	if stopOptions.StopOnZeroEventHandlers {
+		s.zeroHandlerCancelFunc = zeroHandlerCancel
+	}
 
 	fifo := NewDeltaFIFOWithOptions(DeltaFIFOOptions{
 		KnownObjects:          s.indexer,
@@ -382,7 +437,7 @@ func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 		ShouldResync:     s.processor.shouldResync,
 
 		Process:           s.HandleDeltas,
-		WatchErrorHandler: s.watchErrorHandler,
+		WatchErrorHandler: s.handleWatchError,
 	}
 
 	func() {
@@ -407,7 +462,22 @@ func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 		defer s.startedLock.Unlock()
 		s.stopped = true // Don't want any new listeners
 	}()
-	s.controller.Run(stopCh)
+	s.controller.Run(zeroHandlerCtx.Done())
+	klog.Infof("shared informer has stopped for %v", s.objectType)
+
+}
+
+func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
+	ctx, cancel := context.WithCancel(context.TODO())
+	go func() {
+		select {
+		case <-stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	s.RunWithStopOptions(ctx, StopOptions{})
 }
 
 func (s *sharedIndexInformer) HasSynced() bool {
@@ -569,6 +639,59 @@ func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 	return nil
 }
 
+// IsStarted reports whether the informer has already been started
+func (s *sharedIndexInformer) IsStarted() bool {
+	s.startedLock.Lock()
+	defer s.startedLock.Unlock()
+	return s.started
+}
+
+// IsStopped reports whether the informer has already been stopped
+func (s *sharedIndexInformer) IsStopped() bool {
+	s.startedLock.Lock()
+	defer s.startedLock.Unlock()
+	return s.stopped
+}
+
+// EventHandlerCount reports whether the informer still has registered
+// event handlers
+func (s *sharedIndexInformer) EventHandlerCount() int {
+	s.startedLock.Lock()
+	defer s.startedLock.Unlock()
+	return len(s.processor.listeners)
+}
+
+// RemoveEventHandler tries to remove a formerly added event handler.
+// Only event handlers that are (go) comparable can be removed.
+// Please note: If, for some reason, the same handler has been added multiple
+// times, all registrations will be removed.
+func (s *sharedIndexInformer) RemoveEventHandler(handler ResourceEventHandler) error {
+	s.startedLock.Lock()
+	defer s.startedLock.Unlock()
+
+	if s.stopped {
+		return fmt.Errorf("Handler %v is not removed from shared informer because it has stopped already", handler)
+	}
+
+	if !reflect.ValueOf(handler).Type().Comparable() {
+		return fmt.Errorf("Uncomparable handler of type %v is not removed", reflect.ValueOf(handler).Type())
+	}
+
+	// in order to safely remove, we have to
+	// 1. stop sending add/update/delete notifications
+	// 2. remove and stop listener
+	// 3. unblock
+	s.blockDeltas.Lock()
+	defer s.blockDeltas.Unlock()
+	s.processor.removeListenerFor(handler)
+	if len(s.processor.listeners) == 0 {
+		if s.zeroHandlerCancelFunc != nil {
+			s.zeroHandlerCancelFunc()
+		}
+	}
+	return nil
+}
+
 // sharedProcessor has a collection of processorListener and can
 // distribute a notification object to its listeners.  There are two
 // kinds of distribute operations.  The sync distributions go to a
@@ -664,6 +787,38 @@ func (p *sharedProcessor) resyncCheckPeriodChanged(resyncCheckPeriod time.Durati
 		resyncPeriod := determineResyncPeriod(listener.requestedResyncPeriod, resyncCheckPeriod)
 		listener.setResyncPeriod(resyncPeriod)
 	}
+}
+
+func (p *sharedProcessor) removeListenerFor(handler ResourceEventHandler) {
+	p.listenersLock.Lock()
+	defer p.listenersLock.Unlock()
+
+	listeners := p.removeListenerLockedFor(handler)
+	if p.listenersStarted {
+		for _, l := range listeners {
+			close(l.addCh)
+		}
+	}
+}
+
+func (p *sharedProcessor) removeListenerLockedFor(handler ResourceEventHandler) []*processorListener {
+	var listeners []*processorListener
+	for i := 0; i < len(p.listeners); i++ {
+		l := p.listeners[i]
+		if reflect.ValueOf(l.handler).Type().Comparable() && l.handler == handler {
+			listeners = append(listeners, l)
+			p.listeners = append(p.listeners[:i], p.listeners[i+1:]...)
+			i--
+		}
+	}
+	for i := 0; i < len(p.syncingListeners); i++ {
+		l := p.syncingListeners[i]
+		if reflect.ValueOf(l.handler).Type().Comparable() && l.handler == handler {
+			p.syncingListeners = append(p.syncingListeners[:i], p.syncingListeners[i+1:]...)
+			i--
+		}
+	}
+	return listeners
 }
 
 // processorListener relays notifications from a sharedProcessor to
@@ -777,6 +932,8 @@ func (p *processorListener) run() {
 				p.handler.OnAdd(notification.newObj)
 			case deleteNotification:
 				p.handler.OnDelete(notification.oldObj)
+			case errorNotification:
+				p.handler.OnError(notification.err)
 			default:
 				utilruntime.HandleError(fmt.Errorf("unrecognized notification: %T", next))
 			}

@@ -6531,14 +6531,14 @@ func TestValidateRestartPolicy(t *testing.T) {
 }
 
 func TestValidateDNSPolicy(t *testing.T) {
-	successCases := []core.DNSPolicy{core.DNSClusterFirst, core.DNSDefault, core.DNSPolicy(core.DNSClusterFirst), core.DNSNone}
+	successCases := []core.DNSPolicy{core.DNSClusterFirst, core.DNSDefault, core.DNSClusterFirstWithHostNet, core.DNSNone}
 	for _, policy := range successCases {
 		if errs := validateDNSPolicy(&policy, field.NewPath("field")); len(errs) != 0 {
 			t.Errorf("expected success: %v", errs)
 		}
 	}
 
-	errorCases := []core.DNSPolicy{core.DNSPolicy("invalid")}
+	errorCases := []core.DNSPolicy{core.DNSPolicy("invalid"), core.DNSPolicy("")}
 	for _, policy := range errorCases {
 		if errs := validateDNSPolicy(&policy, field.NewPath("field")); len(errs) == 0 {
 			t.Errorf("expected failure for %v", policy)
@@ -17362,6 +17362,46 @@ func TestValidateResourceRequirements(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if errs := ValidateResourceRequirements(&tc.requirements, path, tc.opts); len(errs) == 0 {
 				t.Error("expected errors")
+			}
+		})
+	}
+}
+
+func TestValidateNonSpecialIP(t *testing.T) {
+	fp := field.NewPath("ip")
+
+	// Valid values.
+	for _, tc := range []struct {
+		desc string
+		ip   string
+	}{
+		{"ipv4", "10.1.2.3"},
+		{"ipv6", "2000::1"},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			errs := ValidateNonSpecialIP(tc.ip, fp)
+			if len(errs) != 0 {
+				t.Errorf("ValidateNonSpecialIP(%q, ...) = %v; want nil", tc.ip, errs)
+			}
+		})
+	}
+	// Invalid cases
+	for _, tc := range []struct {
+		desc string
+		ip   string
+	}{
+		{"ipv4 unspecified", "0.0.0.0"},
+		{"ipv6 unspecified", "::0"},
+		{"ipv4 localhost", "127.0.0.0"},
+		{"ipv4 localhost", "127.255.255.255"},
+		{"ipv6 localhost", "::1"},
+		{"ipv6 link local", "fe80::"},
+		{"ipv6 local multicast", "ff02::"},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			errs := ValidateNonSpecialIP(tc.ip, fp)
+			if len(errs) == 0 {
+				t.Errorf("ValidateNonSpecialIP(%q, ...) = nil; want non-nil (errors)", tc.ip)
 			}
 		})
 	}

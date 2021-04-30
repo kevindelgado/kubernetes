@@ -28,10 +28,12 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
+	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
@@ -89,6 +91,7 @@ type Scheduler struct {
 }
 
 type schedulerOptions struct {
+	kubeConfig               *restclient.Config
 	schedulerAlgorithmSource schedulerapi.SchedulerAlgorithmSource
 	percentageOfNodesToScore int32
 	podInitialBackoffSeconds int64
@@ -103,6 +106,13 @@ type schedulerOptions struct {
 
 // Option configures a Scheduler
 type Option func(*schedulerOptions)
+
+// WithKubeConfig sets the kube config for Scheduler.
+func WithKubeConfig(cfg *restclient.Config) Option {
+	return func(o *schedulerOptions) {
+		o.kubeConfig = cfg
+	}
+}
 
 // WithProfiles sets profiles for Scheduler. By default, there is one profile
 // with the name "default-scheduler".
@@ -214,6 +224,7 @@ func New(client clientset.Interface,
 
 	configurator := &Configurator{
 		client:                   client,
+		kubeConfig:               options.kubeConfig,
 		recorderFactory:          recorderFactory,
 		informerFactory:          informerFactory,
 		schedulerCache:           schedulerCache,
@@ -639,14 +650,15 @@ func (sched *Scheduler) skipPodSchedule(fwk framework.Framework, pod *v1.Pod) bo
 		return true
 	}
 
-	// Case 2: pod has been assumed and pod updates could be skipped.
+	// Case 2: pod has been assumed could be skipped.
 	// An assumed pod can be added again to the scheduling queue if it got an update event
 	// during its previous scheduling cycle but before getting assumed.
-	if sched.skipPodUpdate(pod) {
-		return true
+	isAssumed, err := sched.SchedulerCache.IsAssumedPod(pod)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("failed to check whether pod %s/%s is assumed: %v", pod.Namespace, pod.Name, err))
+		return false
 	}
-
-	return false
+	return isAssumed
 }
 
 func defaultAlgorithmSourceProviderName() *string {

@@ -176,7 +176,8 @@ func TestSchedulerCreation(t *testing.T) {
 
 			stopCh := make(chan struct{})
 			defer close(stopCh)
-			s, err := New(client,
+			s, err := New(
+				client,
 				informerFactory,
 				profile.NewRecorderFactory(eventBroadcaster),
 				stopCh,
@@ -456,7 +457,8 @@ func TestSchedulerMultipleProfilesScheduling(t *testing.T) {
 	defer cancel()
 
 	informerFactory := informers.NewSharedInformerFactory(client, 0)
-	sched, err := New(client,
+	sched, err := New(
+		client,
 		informerFactory,
 		profile.NewRecorderFactory(broadcaster),
 		ctx.Done(),
@@ -719,7 +721,7 @@ func TestSchedulerFailedSchedulingReasons(t *testing.T) {
 	queuedPodStore := clientcache.NewFIFO(clientcache.MetaNamespaceKeyFunc)
 	scache := internalcache.New(10*time.Minute, stop)
 
-	// Design the baseline for the pods, and we will make nodes that dont fit it later.
+	// Design the baseline for the pods, and we will make nodes that don't fit it later.
 	var cpu = int64(4)
 	var mem = int64(500)
 	podWithTooBigResourceRequests := podWithResources("bar", "", v1.ResourceList{

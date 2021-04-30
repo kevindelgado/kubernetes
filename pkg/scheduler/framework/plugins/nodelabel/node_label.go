@@ -42,8 +42,7 @@ func New(plArgs runtime.Object, handle framework.Handle) (framework.Plugin, erro
 	if err != nil {
 		return nil, err
 	}
-
-	if err := validation.ValidateNodeLabelArgs(args); err != nil {
+	if err := validation.ValidateNodeLabelArgs(nil, &args); err != nil {
 		return nil, err
 	}
 
@@ -69,6 +68,7 @@ type NodeLabel struct {
 
 var _ framework.FilterPlugin = &NodeLabel{}
 var _ framework.ScorePlugin = &NodeLabel{}
+var _ framework.EnqueueExtensions = &NodeLabel{}
 
 // Name returns name of the plugin. It is used in logs, etc.
 func (pl *NodeLabel) Name() string {
@@ -99,7 +99,7 @@ func (pl *NodeLabel) Filter(ctx context.Context, _ *framework.CycleState, pod *v
 	check := func(labels []string, presence bool) bool {
 		for _, label := range labels {
 			exists := nodeLabels.Has(label)
-			if (exists && !presence) || (!exists && presence) {
+			if exists != presence {
 				return false
 			}
 		}
@@ -120,9 +120,6 @@ func (pl *NodeLabel) Score(ctx context.Context, state *framework.CycleState, pod
 	}
 
 	node := nodeInfo.Node()
-	if node == nil {
-		return 0, framework.NewStatus(framework.Error, "node not found")
-	}
 
 	size := int64(len(pl.args.PresentLabelsPreference) + len(pl.args.AbsentLabelsPreference))
 	if size == 0 {
@@ -150,4 +147,12 @@ func (pl *NodeLabel) Score(ctx context.Context, state *framework.CycleState, pod
 // ScoreExtensions of the Score plugin.
 func (pl *NodeLabel) ScoreExtensions() framework.ScoreExtensions {
 	return nil
+}
+
+// EventsToRegister returns the possible events that may make a Pod
+// failed by this plugin schedulable.
+func (pl *NodeLabel) EventsToRegister() []framework.ClusterEvent {
+	return []framework.ClusterEvent{
+		{Resource: framework.Node, ActionType: framework.Add | framework.UpdateNodeLabel},
+	}
 }

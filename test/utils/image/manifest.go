@@ -223,7 +223,7 @@ func initImageConfigs() (map[int]Config, map[int]Config) {
 	configs[CheckMetadataConcealment] = Config{promoterE2eRegistry, "metadata-concealment", "1.6"}
 	configs[CudaVectorAdd] = Config{e2eRegistry, "cuda-vector-add", "1.0"}
 	configs[CudaVectorAdd2] = Config{promoterE2eRegistry, "cuda-vector-add", "2.2"}
-	configs[DebianIptables] = Config{buildImageRegistry, "debian-iptables", "buster-v1.5.0"}
+	configs[DebianIptables] = Config{buildImageRegistry, "debian-iptables", "buster-v1.6.0"}
 	configs[EchoServer] = Config{promoterE2eRegistry, "echoserver", "2.3"}
 	configs[Etcd] = Config{gcEtcdRegistry, "etcd", "3.4.13-0"}
 	configs[GlusterDynamicProvisioner] = Config{promoterE2eRegistry, "glusterdynamic-provisioner", "v1.0"}
@@ -306,7 +306,7 @@ func getRepositoryMappedConfig(index int, config Config, repo string) Config {
 
 	h := sha256.New()
 	h.Write([]byte(pullSpec))
-	hash := base64.RawURLEncoding.EncodeToString(h.Sum(nil)[:16])
+	hash := base64.RawURLEncoding.EncodeToString(h.Sum(nil))[:16]
 
 	shortName := reCharSafe.ReplaceAllLiteralString(pullSpec, "-")
 	shortName = reDashes.ReplaceAllLiteralString(shortName, "-")
@@ -373,6 +373,9 @@ func ReplaceRegistryInImageURL(imageURL string) (string, error) {
 			}
 		}
 		last := strings.SplitN(parts[countParts-1], ":", 2)
+		if len(last) == 1 {
+			return "", fmt.Errorf("image %q is required to be in an image:tag format", imageURL)
+		}
 		config := getRepositoryMappedConfig(index, Config{
 			registry: parts[0],
 			name:     strings.Join([]string{strings.Join(parts[1:countParts-1], "/"), last[0]}, "/"),
@@ -384,6 +387,8 @@ func ReplaceRegistryInImageURL(imageURL string) (string, error) {
 	switch registryAndUser {
 	case "gcr.io/kubernetes-e2e-test-images":
 		registryAndUser = e2eRegistry
+	case "k8s.gcr.io/e2e-test-images":
+		registryAndUser = promoterE2eRegistry
 	case "k8s.gcr.io":
 		registryAndUser = gcRegistry
 	case "k8s.gcr.io/sig-storage":
